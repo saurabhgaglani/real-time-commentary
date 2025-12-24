@@ -144,4 +144,19 @@ Chess is the medium.
 ---
 
 
+## User story (single, core):
+As a chess player, I want real-time spoken commentary during my live game that is personalized to my historical style, so I can feel like an expert commentator is reacting to my decisions and key moments without requiring me (or a spectator) to understand chess theory.
 
+Acceptance criteria (tight + testable)
+
+Onboarding: user can link the identity used for historical analysis to the identity used for live play (same platform or explicitly mapped accounts). 
+
+Real-time behavior: after each live move, the system either produces commentary within a bounded time window or intentionally stays silent (selective). 
+
+Personalization: commentary references at least one learned tendency (opening preference, risk level, typical structure) when relevant.
+
+Correctness safety: when engine confidence is low (especially at low depth), commentary avoids definitive claims and uses hedged language. 
+
+Narrative continuity: a single “commentator persona” remains consistent across the session. 
+
+Observability: each move/commentary has a traceable event ID across ingestion → enrichment → LLM → TTS → frontend playback.
