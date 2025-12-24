@@ -1,4 +1,7 @@
 .env
+user_games.json
+user_profile.json
+
 # Python
 __pycache__/
 *.pyc
@@ -15,3 +18,4 @@ node_modules/
 
 # OS
 .DS_Store
+

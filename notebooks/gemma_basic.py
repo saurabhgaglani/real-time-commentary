@@ -16,7 +16,7 @@ Player tendencies:
 Current situation:
 - Phase: [opening]
 - Expected style: [laidback]
-- Actual move type: [G4]
+- Actual move type: [E4]
 - Deviation level: [high]
 
 React in one spoken sentence. Be opinionated and human.
