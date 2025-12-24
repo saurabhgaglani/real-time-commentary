@@ -1,3 +1,21 @@
 .env
 user_games.json
 user_profile.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+chess_env/
+venv/
+.env/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+
