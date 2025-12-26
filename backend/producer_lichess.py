@@ -1,28 +1,29 @@
 import json
 import os
-import sys
 import time
 import requests
-from confluent_kafka import Producer
 
+from confluent_kafka import Producer, Consumer
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Project structure:
-# real-time-commentary/
-# ├── client.properties
-# └── backend/
-#     └── producer_lichess.py
+# ------------------
+# Env / paths
+# ------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")  # load .env explicitly
-
+load_dotenv(PROJECT_ROOT / ".env")
 
 STATUS_URL = "https://lichess.org/api/users/status"
 CURRENT_GAME_URL = "https://lichess.org/api/user/{username}/current-game"
 
+PROFILE_INPUT_TOPIC = os.getenv("TOPIC_PROFILE_IN", "player_profile_input")
 
-def read_config(path: str = "client.properties") -> dict:
+# ------------------
+# Kafka config
+# ------------------
+
+def read_config(path: str) -> dict:
     config = {}
     with open(path) as fh:
         for line in fh:
@@ -32,6 +33,9 @@ def read_config(path: str = "client.properties") -> dict:
                 config[k.strip()] = v.strip()
     return config
 
+# ------------------
+# Lichess helpers
+# ------------------
 
 def lichess_user_status(username: str, timeout_s: int = 10) -> dict:
     r = requests.get(
@@ -62,8 +66,12 @@ def split_moves(moves_str: str | None) -> list[str]:
     return moves_str.strip().split() if moves_str else []
 
 
+# ------------------
+# Kafka helpers
+# ------------------
+
 def delivery_report(err, msg):
-    if err is not None:
+    if err:
         print(f"[DELIVERY_FAILED] {err}", flush=True)
     else:
         print(
@@ -72,36 +80,50 @@ def delivery_report(err, msg):
         )
 
 
+def wait_for_profile(config: dict) -> dict:
+    consumer = Consumer({
+        **config,
+        "group.id": f"lichess-profile-consumer-v5",
+        "auto.offset.reset": "latest",
+    })
+
+    consumer.subscribe([PROFILE_INPUT_TOPIC])
+    #consumer.poll(5.0)
+    time.sleep(3)
+    print("[WAIT] Waiting for profile message...", flush=True)
+
+    while True:
+        msg = consumer.poll(1.0)
+        if msg is None:
+            continue
+        if msg.error():
+            raise RuntimeError(msg.error())
+
+        profile_event = json.loads(msg.value())
+        print(f"[PROFILE_RECEIVED] username={profile_event['username']}", flush=True)
+        return profile_event
+
+
+# ------------------
+# Main producer logic
+# ------------------
+
 def produce_lichess_stream(
     username: str,
+    profile: dict,
     topic_player_profile: str,
     topic_live_moves: str,
     topic_session_events: str,
     config: dict,
     poll_seconds: float = 1.0,
-    exit_on_game_end: bool = False,
 ):
-    """
-    Tokenless producer:
-      - Uses /api/users/status to discover playingId (game_id)
-      - Uses /api/user/{username}/current-game to get moves snapshot
-      - Diffs moves and emits only new ones
-
-    Produces:
-      - player_profile (once per game)
-      - live_moves (per new move)
-      - session_events (start/end)
-    """
     producer = Producer(config)
 
     last_game_id = None
     last_moves: list[str] = []
     profile_sent = False
 
-    print(
-        f"[START] username={username} poll={poll_seconds}s exit_on_game_end={exit_on_game_end}",
-        flush=True,
-    )
+    print(f"[START] Tracking user={username}", flush=True)
 
     while True:
         try:
@@ -110,8 +132,7 @@ def produce_lichess_stream(
             playing = bool(status.get("playing"))
 
             if not playing or not playing_id:
-                # If we were previously in a game, emit end once
-                if last_game_id is not None:
+                if last_game_id:
                     end_payload = {
                         "event": "session_end",
                         "username": username,
@@ -125,11 +146,7 @@ def produce_lichess_stream(
                         callback=delivery_report,
                     )
                     producer.flush()
-                    print(f"[SESSION_END] game_id={last_game_id}", flush=True)
-
-                    if exit_on_game_end:
-                        print("[EXIT] exit_on_game_end=true", flush=True)
-                        return
+                    print(f"[SESSION_END] {last_game_id}", flush=True)
 
                 last_game_id = None
                 last_moves = []
@@ -137,122 +154,107 @@ def produce_lichess_stream(
                 time.sleep(2)
                 continue
 
-            game_id = playing_id
-
-            # New game detected
-            if game_id != last_game_id:
-                last_game_id = game_id
+            if playing_id != last_game_id:
+                last_game_id = playing_id
                 last_moves = []
                 profile_sent = False
 
                 start_payload = {
                     "event": "session_start",
                     "username": username,
-                    "game_id": game_id,
+                    "game_id": playing_id,
                     "ts": int(time.time() * 1000),
                 }
                 producer.produce(
                     topic_session_events,
-                    key=game_id,
+                    key=playing_id,
                     value=json.dumps(start_payload),
                     callback=delivery_report,
                 )
                 producer.flush()
-                print(f"[SESSION_START] game_id={game_id}", flush=True)
+                print(f"[SESSION_START] {playing_id}", flush=True)
 
-            # Fetch snapshot
             snap = lichess_current_game(username)
             if snap is None:
-                # Sometimes status says playing but current-game 404s briefly; wait and retry
                 time.sleep(1)
                 continue
 
-            # Emit player_profile once per game (placeholder; replace later)
+            # Emit REAL profile (from FastAPI) once per game
             if not profile_sent:
-                # TODO: Replace with real pre-game profile builder output.
-                profile_payload = {
-                    "game_id": game_id,
-                    "username": username,
-                    "profile": {
-                        "preferred_openings": [],  # you can populate later
-                        "style": "unknown",
-                        "risk_tolerance": "unknown",
-                    },
-                }
                 producer.produce(
                     topic_player_profile,
-                    key=game_id,
-                    value=json.dumps(profile_payload),
+                    key=last_game_id,
+                    value=json.dumps({
+                        "game_id": last_game_id,
+                        "username": username,
+                        "profile": profile,
+                    }),
                     callback=delivery_report,
                 )
                 producer.flush()
                 profile_sent = True
-                print(f"[PROFILE_SENT] game_id={game_id}", flush=True)
+                print(f"[PROFILE_EMITTED] game_id={last_game_id}", flush=True)
 
-            # Moves diff
             moves = split_moves(snap.get("moves"))
             if len(moves) > len(last_moves):
-                new_moves = moves[len(last_moves) :]
+                new_moves = moves[len(last_moves):]
                 for idx, uci in enumerate(new_moves, start=len(last_moves) + 1):
                     move_payload = {
-                        "game_id": game_id,
+                        "game_id": last_game_id,
                         "username": username,
                         "move_number": idx,
                         "uci_move": uci,
-                        # "fen": snap.get("fen"),  # current-game JSON may or may not include fen
                         "ts": int(time.time() * 1000),
                     }
                     producer.produce(
                         topic_live_moves,
-                        key=game_id,  # key by game_id => ordering per game
+                        key=last_game_id,
                         value=json.dumps(move_payload),
                         callback=delivery_report,
                     )
-                    print(f"[MOVE] game_id={game_id} #{idx} {uci}", flush=True)
+                    print(f"[MOVE] {last_game_id} #{idx} {uci}", flush=True)
 
-                # serve callbacks
                 producer.poll(0)
                 last_moves = moves
 
             producer.poll(0)
             time.sleep(poll_seconds)
 
-        except requests.RequestException as e:
-            print(f"[HTTP_ERROR] {e}", flush=True)
-            time.sleep(2)
         except Exception as e:
             print(f"[ERROR] {e}", flush=True)
             time.sleep(2)
 
 
-def main():
-    username = sys.argv[1] if len(sys.argv) > 1 else os.getenv("LICHESS_USERNAME")
-    if not username:
-        raise SystemExit("Usage: python producer_lichess.py <lichess_username>")
+# ------------------
+# Entry point
+# ------------------
 
-    # config = read_config(os.getenv("KAFKA_CONFIG", "client.properties"))
+def main():
     config_path = Path(os.getenv("KAFKA_CONFIG", str(PROJECT_ROOT / "client.properties")))
-    
     config = read_config(str(config_path))
 
-    print(f"[CONFIG] using client.properties at: {config_path}", flush=True)
+    print(f"[CONFIG] Loaded from {config_path}", flush=True)
 
-
-    topic_player_profile = os.getenv("TOPIC_PLAYER_PROFILE", "player_profile")
+    topic_player_profile = os.getenv("TOPIC_PROFILE_IN", "player_profile_input")
     topic_live_moves = os.getenv("TOPIC_LIVE_MOVES", "live_moves")
     topic_session_events = os.getenv("TOPIC_SESSION_EVENTS", "session_events")
-
     poll_seconds = float(os.getenv("POLL_SECONDS", "1.0"))
-    exit_on_game_end = os.getenv("EXIT_ON_GAME_END", "false").lower() == "true"
+
+    profile_event = wait_for_profile(config)
+
+    username = profile_event["username"]
+    profile = profile_event["profile"]
+
+    print(profile)
 
     produce_lichess_stream(
         username=username,
+        profile=profile,
         topic_player_profile=topic_player_profile,
         topic_live_moves=topic_live_moves,
         topic_session_events=topic_session_events,
         config=config,
         poll_seconds=poll_seconds,
-        exit_on_game_end=exit_on_game_end,
     )
 
 

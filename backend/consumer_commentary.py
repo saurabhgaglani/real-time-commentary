@@ -37,7 +37,7 @@ def read_config(path: str = "client.properties") -> dict:
     return config
 
 
-TOPIC_PLAYER_PROFILE = os.getenv("TOPIC_PLAYER_PROFILE", "player_profile")
+TOPIC_PLAYER_PROFILE = os.getenv("TOPIC_PROFILE_IN", "player_profile_input")
 TOPIC_LIVE_MOVES = os.getenv("TOPIC_LIVE_MOVES", "live_moves")
 TOPIC_OUT_AUDIO = os.getenv("TOPIC_OUT_AUDIO", "commentary_audio")
 
@@ -360,109 +360,6 @@ def main():
         print("\n[SHUTDOWN]", flush=True)
     finally:
         consumer.close()
-
-
-# def main():
-#     config = read_config(os.getenv("KAFKA_CONFIG", "client.properties"))
-
-#     # Consumer config
-#     consumer_conf = dict(config)
-#     consumer_conf["group.id"] = GROUP_ID
-#     consumer_conf["auto.offset.reset"] = AUTO_OFFSET_RESET
-
-#     consumer = Consumer(consumer_conf)
-#     consumer.subscribe([TOPIC_PLAYER_PROFILE, TOPIC_LIVE_MOVES])
-
-#     # Producer for output audio events
-#     producer = Producer(config)
-
-#     print(f"[BOOT] consuming: {TOPIC_PLAYER_PROFILE}, {TOPIC_LIVE_MOVES} | producing: {TOPIC_OUT_AUDIO}", flush=True)
-
-#     try:
-#         while True:
-#             msg = consumer.poll(1.0)
-#             if msg is None:
-#                 continue
-#             if msg.error():
-#                 print(f"[KAFKA_ERROR] {msg.error()}", flush=True)
-#                 continue
-
-#             topic = msg.topic()
-#             payload = json.loads(msg.value().decode("utf-8"))
-
-#             if topic == TOPIC_PLAYER_PROFILE:
-#                 game_id = payload["game_id"]
-#                 profile = payload.get("profile", {})
-#                 summary, style, risk = compress_profile(profile)
-
-#                 STORE[game_id] = GameState(
-#                     profile_summary_text=summary,
-#                     expected_style=style,
-#                     risk_tolerance=risk,
-#                 )
-#                 print(f"[PROFILE] cached game_id={game_id}", flush=True)
-#                 continue
-
-#             if topic == TOPIC_LIVE_MOVES:
-#                 game_id = payload["game_id"]
-#                 move_number = int(payload["move_number"])
-#                 uci_move = payload.get("uci_move")
-
-#                 st = STORE.get(game_id)
-#                 if not st:
-#                     print(f"[NO_PROFILE] game_id={game_id} move={move_number}", flush=True)
-#                     continue
-
-#                 prev_phase = st.phase
-#                 phase = derive_phase(move_number)
-#                 st.phase = phase
-#                 phase_transition = (prev_phase != phase)
-
-#                 move_character = derive_move_character(move_number, uci_move)
-#                 deviation = derive_deviation(st.expected_style, st.risk_tolerance, move_character)
-
-#                 decision = should_comment(st, move_number, phase, move_character, deviation, phase_transition)
-#                 print(f"[MOVE] game_id={game_id} #{move_number} type={move_character} dev={deviation} speak={decision}", flush=True)
-
-#                 if not decision:
-#                     continue
-
-#                 prompt = build_prompt(st, phase, move_character, deviation)
-
-#                 # --- LABEL: CALL_LLM ---
-#                 raw_text = call_llm(prompt)
-#                 commentary_text = sanitize_text(raw_text)
-
-#                 # --- LABEL: CALL_ELEVENLABS ---
-#                 audio_bytes, audio_fmt = call_elevenlabs_tts(commentary_text)
-
-#                 out = {
-#                     "game_id": game_id,
-#                     "move_number": move_number,
-#                     "commentary_text": commentary_text,
-#                     "audio_format": audio_fmt,
-#                     "audio_base64": base64.b64encode(audio_bytes).decode("utf-8"),
-#                     "created_at_ms": int(time.time() * 1000),
-#                 }
-
-#                 # --- LABEL: PRODUCE_AUDIO ---
-#                 producer.produce(
-#                     TOPIC_OUT_AUDIO,
-#                     key=game_id,
-#                     value=json.dumps(out).encode("utf-8"),
-#                 )
-#                 producer.flush()
-
-#                 st.last_commentary_ts = time.time()
-#                 st.last_commentary_move = move_number
-
-#                 print(f"[AUDIO] emitted game_id={game_id} move={move_number}", flush=True)
-
-#     except KeyboardInterrupt:
-#         print("\n[SHUTDOWN]", flush=True)
-#     finally:
-#         consumer.close()
-
 
 if __name__ == "__main__":
     main()
