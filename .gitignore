@@ -24,3 +24,8 @@ client.properties
 
 # Binaries
 /backend/bin/
+
+# Audios
+
+audio/
+*.mp3
