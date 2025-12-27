@@ -4,9 +4,10 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from confluent_kafka import Consumer, Producer
+from google import genai
 
 
 
@@ -36,6 +37,7 @@ def read_config(path: str = "client.properties") -> dict:
                 config[k.strip()] = v.strip()
     return config
 
+client = genai.Client(api_key=os.getenv("YOUR_API_KEY"))
 
 TOPIC_PLAYER_PROFILE = os.getenv("TOPIC_PROFILE_IN", "player_profile_input")
 TOPIC_LIVE_MOVES = os.getenv("TOPIC_LIVE_MOVES", "live_moves")
@@ -48,15 +50,17 @@ COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "15"))
 MIN_MOVES_BETWEEN_COMMENTS = int(os.getenv("MIN_MOVES_BETWEEN_COMMENTS", "3"))
 
 
+
+
 # ---------------------------
 # In-memory state
 # ---------------------------
 
 @dataclass
 class GameState:
-    profile_summary_text: str
+    profile_json: dict
     expected_style: str
-    risk_tolerance: str
+    username: str
     last_commentary_ts: float = 0.0
     last_commentary_move: int = 0
     phase: str = "opening"
@@ -70,90 +74,49 @@ STORE: Dict[str, GameState] = {}
 # Profile compression
 # ---------------------------
 
-def compress_profile(profile: Dict[str, Any]) -> tuple[str, str, str]:
-    openings = profile.get("preferred_openings") or []
-    style = str(profile.get("style") or "unknown").strip().lower()
-    risk = str(profile.get("risk_tolerance") or "unknown").strip().lower()
 
-    bullets = []
-    if openings:
-        bullets.append(f"- Usually prefers comfort openings like {', '.join(openings[:3])}.")
-    else:
-        bullets.append("- Has recognizable comfort patterns early on.")
 
-    if style in {"solid", "defensive"}:
-        bullets.append("- Typically plays solid and avoids messy complications.")
-    elif style in {"aggressive", "tactical"}:
-        bullets.append("- Usually plays aggressively and looks for initiative.")
-    else:
-        bullets.append("- Style varies but tends to repeat familiar plans.")
+def compress_profile(profile: Dict[str, Any]):
+    """
+        Returns Style and Profile (JSON right now. )
+        Risk is unknown since not rxd in the earlier json.
+    """
+    style = profile.get("behavior", {}).get("style", 'Unknown Style')
+    return style, profile
 
-    if risk == "low":
-        bullets.append("- Low risk tolerance: prefers safety over sharp gambles.")
-    elif risk == "high":
-        bullets.append("- High risk tolerance: comfortable taking big chances.")
-    else:
-        bullets.append("- Risk tolerance is mixed depending on position.")
-
-    summary = "Player tendencies:\n" + "\n".join(bullets[:5])
-    return summary, style or "unknown", risk or "unknown"
 
 
 # ---------------------------
 # Heuristics
 # ---------------------------
 
-def derive_phase(move_number: int) -> str:
-    if move_number <= 10:
-        return "opening"
-    if move_number <= 30:
-        return "midgame"
-    return "endgame"
 
 
-def derive_move_character(move_number: int, uci_move: Optional[str]) -> str:
-    u = (uci_move or "").lower()
-    # simple: early wing pawn push => aggressive
-    if move_number <= 8 and len(u) >= 2 and u[0] in {"a", "h"}:
-        return "aggressive"
-    # early g-pawn push => risky
-    if move_number <= 10 and len(u) >= 2 and u[0] == "g":
-        return "risky"
-    return "solid"
+def calculate_latest_move(snap):
+    """
+    Calculates the last move and player who played.
+    Input: snap
+    Ret: last_move : str, move_player : str
+    
+    """
+    last_move = 'Empty'
+    move_list = snap.get('moves', [])
 
+    if isinstance(move_list, str):
+        move_list = move_list.split()
 
-def derive_deviation(expected_style: str, risk_tolerance: str, move_character: str) -> str:
-    exp = (expected_style or "unknown").lower()
-    risk = (risk_tolerance or "unknown").lower()
+    if len(move_list) > 0:
+        last_move = move_list[-1]
 
-    score = 0
-    if exp in {"solid", "defensive"} and move_character in {"aggressive", "risky"}:
-        score += 2
-    if risk == "low" and move_character == "risky":
-        score += 2
+    if len(move_list) == '0':
+        move_player = 'Nobody Played Yet'
 
-    if score >= 3:
-        return "high"
-    if score == 2:
-        return "moderate"
-    return "low"
+    elif len(move_list) % 2 ==0:
+        move_player = 'Black'
+    else:
+        move_player = 'White'
 
-
-def should_comment(st: GameState, move_number: int, phase: str, move_character: str, deviation: str, phase_transition: bool) -> bool:
-    now = time.time()
-    if (now - st.last_commentary_ts) < COOLDOWN_SECONDS:
-        return False
-    if (move_number - st.last_commentary_move) < MIN_MOVES_BETWEEN_COMMENTS:
-        return False
-
-    if phase_transition:
-        return True
-    if deviation in {"moderate", "high"}:
-        return True
-    if move_character in {"risky", "surprising"}:
-        return True
-    return False
-
+    return last_move, move_player
 
 # ---------------------------
 # Prompt + output rules
@@ -162,22 +125,18 @@ def should_comment(st: GameState, move_number: int, phase: str, move_character: 
 _SAN_RE = re.compile(r"\b[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?\b")
 _UCI_RE = re.compile(r"\b[a-h][1-8][a-h][1-8][qrbn]?\b", re.IGNORECASE)
 
-def build_prompt(st: GameState, phase: str, move_character: str, deviation: str) -> str:
+def build_prompt(st: GameState, player_colour: str, move_character: str, snap: dict) -> str:
+    profile_str = json.dumps(st.profile_json, ensure_ascii=False)
+    snap_str = json.dumps(snap, ensure_ascii=False)
+
     return (
-        "You are a chess commentator.\n\n"
-        f"{st.profile_summary_text}\n\n"
+        f"You are a chess commentator like Judit Polgar. Here is the profile JSON for the player we are tracking with the username {st.username}. He is playing as {player_colour}\n\n"
+        f"{profile_str}\n\n"
         "Current situation:\n"
-        f"- Phase: {phase}\n"
-        f"- Expected style: {st.expected_style}\n"
-        f"- Actual move type: {move_character}\n"
-        f"- Deviation level: {deviation}\n\n"
+        f"- The latest move played is : {move_character}\n"
+        f"- Complete Move details in JSON : {snap_str}\n\n"
+        "(if absent, pregame). Treat the JSON as the player’s long-term identity (username, habits, style, psychology). Do not let new audiences feel left out make them feel how brutal and taxing chess is. Derive patterns of users play using openings and game lengths and how theyve been playing recently. Talk about whether they are coming off a win or loss with black and white. Build tension up if pregame."
         "React in one spoken sentence. Be opinionated and human.\n"
-        "Do not explain chess theory.\n\n"
-        "Rules:\n"
-        "One sentence only\n"
-        "No engine evaluations\n"
-        "No move notation\n"
-        "No technical language\n"
     )
 
 
@@ -207,10 +166,13 @@ def call_llm(prompt: str) -> str:
     Implement sync call to your LLM here (or wrap async elsewhere).
     Return ONE sentence (we sanitize anyway).
     """
-    print("Called the LLM")
-
+    response = client.models.generate_content(
+    model="gemma-3-27b-it",
+    contents=prompt
+    )
+    print("LLM Response : ", response.text)
     # --- CALL_LLM: START ---
-    return "That’s a surprisingly bold choice for someone who usually plays it safe."
+    return response.text
     # --- CALL_LLM: END ---
 
 
@@ -231,11 +193,9 @@ def call_elevenlabs_tts(text: str) -> tuple[bytes, str]:
 # ---------------------------
 
 def main():
-    # config = read_config(os.getenv("KAFKA_CONFIG", "client.properties"))
+    
     config_path = Path(os.getenv("KAFKA_CONFIG", str(PROJECT_ROOT / "client.properties")))
     config = read_config(str(config_path))
-
-    print(f"[CONFIG] using client.properties at: {config_path}", flush=True)
 
 
     # Consumer config
@@ -273,15 +233,16 @@ def main():
 
             # --- Profile messages ---
             # Accept either explicit event or schema shape (in case producer doesn't include event)
-            if event == "player_profile" or ("profile" in payload and "game_id" in payload and "username" in payload):
+            if event == "player_profile":
                 game_id = payload["game_id"]
                 profile = payload.get("profile", {})
-                summary, style, risk = compress_profile(profile)
+                style, summary = compress_profile(profile) 
 
                 STORE[game_id] = GameState(
-                    profile_summary_text=summary,
+                    profile_json=summary,
                     expected_style=style,
-                    risk_tolerance=risk,
+                    username= profile.get("identity", {}).get('username', 'Unknown User')
+
                 )
                 print(f"[PROFILE] cached game_id={game_id}", flush=True)
                 continue
@@ -292,38 +253,39 @@ def main():
                 continue
 
             # --- Live move messages ---
-            if event == "live_move" or ("uci_move" in payload and "move_number" in payload and "game_id" in payload):
+            if event == "move":
                 game_id = payload["game_id"]
                 move_number = int(payload["move_number"])
                 uci_move = payload.get("uci_move")
+                snap = payload.get("snap")
 
                 st = STORE.get(game_id)
                 if not st:
                     print(f"[NO_PROFILE] game_id={game_id} move={move_number}", flush=True)
                     continue
 
-                prev_phase = st.phase
-                phase = derive_phase(move_number)
-                st.phase = phase
-                phase_transition = (prev_phase != phase)
-
-                move_character = derive_move_character(move_number, uci_move)
-                deviation = derive_deviation(st.expected_style, st.risk_tolerance, move_character)
-
-                decision = should_comment(st, move_number, phase, move_character, deviation, phase_transition)
+                move_character, player_colour = calculate_latest_move(snap)
                 print(
-                    f"[MOVE] game_id={game_id} #{move_number} type={move_character} dev={deviation} speak={decision}",
+                    f"[MOVE] game_id={game_id} #{move_number} Latest Move ={move_character} player colour ={player_colour} ",
                     flush=True,
                 )
 
-                if not decision:
-                    continue
+                # Open for conditions where we want to limit commentary
+                # if not decision:
+                #     continue
 
-                prompt = build_prompt(st, phase, move_character, deviation)
+                print("BUILDING PROMPT")
+
+                prompt = build_prompt(st, player_colour, move_character, snap)
+
+                print("CALLING LLM")
 
                 # --- LABEL: CALL_LLM ---
                 raw_text = call_llm(prompt)
+                print("RAW RESPONSE : ", raw_text)
+
                 commentary_text = sanitize_text(raw_text)
+                print("Sanitized Commentary : ", commentary_text)
 
                 # --- LABEL: CALL_ELEVENLABS ---
                 audio_bytes, audio_fmt = call_elevenlabs_tts(commentary_text)
@@ -352,14 +314,13 @@ def main():
                 print(f"[AUDIO] emitted game_id={game_id} move={move_number}", flush=True)
                 continue
 
-            # Unknown message type on the shared topic
-            # (Keep silent or log once if you prefer.)
-            # print(f"[SKIP] unknown payload keys={list(payload.keys())}", flush=True)
 
     except KeyboardInterrupt:
         print("\n[SHUTDOWN]", flush=True)
     finally:
         consumer.close()
+
+
 
 if __name__ == "__main__":
     main()
