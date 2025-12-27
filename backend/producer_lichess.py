@@ -185,6 +185,7 @@ def produce_lichess_stream(
                     topic_player_profile,
                     key=last_game_id,
                     value=json.dumps({
+                        "event": "player_profile", # Updated the key.
                         "game_id": last_game_id,
                         "username": username,
                         "profile": profile,
@@ -200,10 +201,11 @@ def produce_lichess_stream(
                 new_moves = moves[len(last_moves):]
                 for idx, uci in enumerate(new_moves, start=len(last_moves) + 1):
                     move_payload = {
+                        "event": "move",
                         "game_id": last_game_id,
-                        "username": username,
+                        "username": username, 
                         "move_number": idx,
-                        "uci_move": uci,
+                        "snap": snap, # Changed UCI to Snap.
                         "ts": int(time.time() * 1000),
                     }
                     producer.produce(
@@ -232,8 +234,6 @@ def produce_lichess_stream(
 def main():
     config_path = Path(os.getenv("KAFKA_CONFIG", str(PROJECT_ROOT / "client.properties")))
     config = read_config(str(config_path))
-
-    print(f"[CONFIG] Loaded from {config_path}", flush=True)
 
     topic_player_profile = os.getenv("TOPIC_PROFILE_IN", "player_profile_input")
     topic_live_moves = os.getenv("TOPIC_LIVE_MOVES", "live_moves")
