@@ -89,7 +89,6 @@ def wait_for_profile(config: dict) -> dict:
 
     consumer.subscribe([PROFILE_INPUT_TOPIC])
     #consumer.poll(5.0)
-    time.sleep(3)
     print("[WAIT] Waiting for profile message...", flush=True)
 
     while True:
@@ -199,22 +198,22 @@ def produce_lichess_stream(
             moves = split_moves(snap.get("moves"))
             if len(moves) > len(last_moves):
                 new_moves = moves[len(last_moves):]
-                for idx, uci in enumerate(new_moves, start=len(last_moves) + 1):
-                    move_payload = {
-                        "event": "move",
-                        "game_id": last_game_id,
-                        "username": username, 
-                        "move_number": idx,
-                        "snap": snap, # Changed UCI to Snap.
-                        "ts": int(time.time() * 1000),
-                    }
-                    producer.produce(
-                        topic_live_moves,
-                        key=last_game_id,
-                        value=json.dumps(move_payload),
-                        callback=delivery_report,
-                    )
-                    print(f"[MOVE] {last_game_id} #{idx} {uci}", flush=True)
+                #for idx, uci in enumerate(new_moves, start=len(last_moves) + 1):
+                move_payload = {
+                    "event": "move",
+                    "game_id": last_game_id,
+                    "username": username, 
+                    "move_number": len(moves),
+                    "snap": snap, # Changed UCI to Snap.
+                    "ts": int(time.time() * 1000),
+                }
+                producer.produce(
+                    topic_live_moves,
+                    key=last_game_id,
+                    value=json.dumps(move_payload),
+                    callback=delivery_report,
+                )
+                print(f"[MOVE] {last_game_id} #{len(moves)} {moves[-1]}", flush=True)
 
                 producer.poll(0)
                 last_moves = moves
