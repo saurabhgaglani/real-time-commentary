@@ -81,14 +81,19 @@ def delivery_report(err, msg):
 
 
 def wait_for_profile(config: dict) -> dict:
+    import time
+    
+    # Use timestamp-based consumer group to always start fresh
+    consumer_group = f"lichess-profile-consumer-{int(time.time())}"
+    
     consumer = Consumer({
         **config,
-        "group.id": f"lichess-profile-consumer-v6",  # Increment version to reset offset
+        "group.id": consumer_group,
         "auto.offset.reset": "latest",  # Only read NEW messages
     })
 
     consumer.subscribe([PROFILE_INPUT_TOPIC])
-    print("[WAIT] Waiting for NEW profile message from UI...", flush=True)
+    print(f"[WAIT] Waiting for NEW profile message from UI... (group: {consumer_group})", flush=True)
     print("[INFO] Please use the UI to analyze a user and send a profile.", flush=True)
 
     while True:

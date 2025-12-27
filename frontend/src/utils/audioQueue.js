@@ -22,6 +22,19 @@ class AudioQueueManager {
      * @param {string} audioEvent.latest_move - Latest move notation
      */
     enqueue(audioEvent) {
+        // Check for duplicate events already in queue
+        const isDuplicate = this.queue.some(
+            event => event.game_id === audioEvent.game_id && 
+                     event.move_number === audioEvent.move_number &&
+                     event.created_at_ms === audioEvent.created_at_ms
+        );
+        
+        if (isDuplicate) {
+            console.log(`[AudioQueue] Skipping duplicate event: move ${audioEvent.move_number}`);
+            return;
+        }
+        
+        console.log(`[AudioQueue] Enqueuing move ${audioEvent.move_number}, current queue: ${this.queue.length}`);
         this.queue.push(audioEvent);
         
         // Start playback immediately if not currently playing
@@ -38,6 +51,12 @@ class AudioQueueManager {
      * Automatically continues to next item after current finishes
      */
     async playNext() {
+        // Guard: If already playing, don't start another playback
+        if (this.isPlaying && this.currentAudio) {
+            console.log('[AudioQueue] Already playing, skipping playNext call');
+            return;
+        }
+        
         // Check if queue is empty
         if (this.queue.length === 0) {
             this.isPlaying = false;
@@ -50,6 +69,8 @@ class AudioQueueManager {
         const event = this.queue.shift();
         this.isPlaying = true;
         this.currentEvent = event;
+        
+        console.log(`[AudioQueue] Playing move ${event.move_number}, queue length: ${this.queue.length}`);
 
         try {
             await this.playAudio(event);
@@ -57,8 +78,9 @@ class AudioQueueManager {
             console.error('Audio playback failed:', error, event);
             // Continue to next audio even if current fails
         }
-
+        
         // Play next audio after current finishes (or fails)
+        // Don't reset isPlaying here - let playNext() handle it
         this.playNext();
     }
 

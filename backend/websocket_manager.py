@@ -3,6 +3,7 @@ WebSocket Manager for real-time commentary delivery.
 
 This module manages WebSocket connections and bridges Kafka audio events
 to connected clients.
+websocket_manager.py
 """
 
 from fastapi import WebSocket
@@ -222,10 +223,14 @@ class KafkaWebSocketBridge:
             # Create unique event ID for deduplication
             event_id = f"{game_id}:{move_number}:{created_at_ms}"
             
+            logger.info(f"[DEDUP CHECK] Event ID: {event_id}")
+            
             # Check if we've already processed this event
             if event_id in self.processed_events:
-                logger.debug(f"Skipping duplicate audio event: {event_id}")
+                logger.warning(f"[DUPLICATE DETECTED] Skipping duplicate audio event: {event_id}")
                 return
+            
+            logger.info(f"[NEW EVENT] Processing new audio event: {event_id}")
             
             # Mark as processed
             self.processed_events.add(event_id)
