@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Playback Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .audio-list {
+            margin: 20px 0;
+        }
+        .audio-item {
+            padding: 15px;
+            margin: 10px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .audio-item.playing {
+            background: #e7f3ff;
+            border-left-color: #28a745;
+        }
+        .audio-item.played {
+            opacity: 0.6;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        .queue-info {
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Audio Playback Test</h1>
+        
+        <div id="status" class="status loading">Loading audio files...</div>
+        
+        <div class="controls">
+            <button id="playBtn" onclick="startPlayback()" disabled>▶️ Play All</button>
+            <button id="stopBtn" onclick="stopPlayback()" disabled>⏹️ Stop</button>
+            <button onclick="loadAudioFiles()">🔄 Refresh List</button>
+        </div>
+        
+        <div class="queue-info">
+            <strong>Queue:</strong> <span id="queueInfo">-</span>
+        </div>
+        
+        <div id="audioList" class="audio-list"></div>
+    </div>
+
+    <script>
+        let audioFiles = [];
+        let currentIndex = 0;
+        let isPlaying = false;
+        let currentAudio = null;
+
+        // Load audio files from backend
+        async function loadAudioFiles() {
+            const statusEl = document.getElementById('status');
+            const audioListEl = document.getElementById('audioList');
+            
+            statusEl.className = 'status loading';
+            statusEl.textContent = 'Loading audio files...';
+            
+            try {
+                // Fetch list of audio files
+                const response = await fetch('http://127.0.0.1:8000/audio/');
+                const html = await response.text();
+                
+                // Parse HTML to extract .mp3 files
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                const links = doc.querySelectorAll('a');
+                
+                audioFiles = [];
+                links.forEach(link => {
+                    const href = link.getAttribute('href');
+                    if (href && href.endsWith('.mp3')) {
+                        audioFiles.push({
+                            name: href,
+                            url: `http://127.0.0.1:8000/audio/${href}`,
+                            played: false
+                        });
+                    }
+                });
+                
+                if (audioFiles.length === 0) {
+                    statusEl.className = 'status error';
+                    statusEl.textContent = '❌ No audio files found in audio/ folder';
+                    audioListEl.innerHTML = '<p>Please generate some audio files first.</p>';
+                    return;
+                }
+                
+                statusEl.className = 'status success';
+                statusEl.textContent = `✅ Found ${audioFiles.length} audio file(s)`;
+                
+                // Display audio files
+                displayAudioFiles();
+                
+                // Enable play button
+                document.getElementById('playBtn').disabled = false;
+                updateQueueInfo();
+                
+            } catch (error) {
+                statusEl.className = 'status error';
+                statusEl.textContent = `❌ Error: ${error.message}. Make sure backend is running on port 8000.`;
+                console.error('Error loading audio files:', error);
+            }
+        }
+        
+        function displayAudioFiles() {
+            const audioListEl = document.getElementById('audioList');
+            audioListEl.innerHTML = '<h3>Audio Files:</h3>';
+            
+            audioFiles.forEach((file, index) => {
+                const div = document.createElement('div');
+                div.className = 'audio-item';
+                div.id = `audio-${index}`;
+                div.innerHTML = `
+                    <strong>${index + 1}.</strong> ${file.name}
+                    <span id="status-${index}"></span>
+                `;
+                audioListEl.appendChild(div);
+            });
+        }
+        
+        function updateQueueInfo() {
+            const remaining = audioFiles.length - currentIndex;
+            const queueInfoEl = document.getElementById('queueInfo');
+            queueInfoEl.textContent = `${remaining} file(s) remaining`;
+        }
+        
+        async function startPlayback() {
+            if (isPlaying) return;
+            
+            isPlaying = true;
+            currentIndex = 0;
+            
+            // Reset all files
+            audioFiles.forEach(f => f.played = false);
+            
+            document.getElementById('playBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            
+            playNext();
+        }
+        
+        function playNext() {
+            if (!isPlaying || currentIndex >= audioFiles.length) {
+                stopPlayback();
+                return;
+            }
+            
+            const file = audioFiles[currentIndex];
+            const itemEl = document.getElementById(`audio-${currentIndex}`);
+            const statusEl = document.getElementById(`status-${currentIndex}`);
+            
+            // Mark as playing
+            itemEl.className = 'audio-item playing';
+            statusEl.textContent = '🔊 Playing...';
+            
+            // Create and play audio
+            currentAudio = new Audio(file.url);
+            
+            currentAudio.onended = () => {
+                // Mark as played
+                file.played = true;
+                itemEl.className = 'audio-item played';
+                statusEl.textContent = '✅ Played';
+                
+                // Move to next
+                currentIndex++;
+                updateQueueInfo();
+                
+                // Play next after a short delay
+                setTimeout(() => {
+                    if (isPlaying) {
+                        playNext();
+                    }
+                }, 500);
+            };
+            
+            currentAudio.onerror = (error) => {
+                statusEl.textContent = '❌ Error';
+                console.error('Audio playback error:', error);
+                
+                // Try next file
+                currentIndex++;
+                updateQueueInfo();
+                setTimeout(() => {
+                    if (isPlaying) {
+                        playNext();
+                    }
+                }, 500);
+            };
+            
+            currentAudio.play().catch(error => {
+                console.error('Play error:', error);
+                statusEl.textContent = '❌ Failed to play';
+            });
+            
+            updateQueueInfo();
+        }
+        
+        function stopPlayback() {
+            isPlaying = false;
+            
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            
+            // Update status
+            const statusEl = document.getElementById('status');
+            statusEl.className = 'status success';
+            statusEl.textContent = `✅ Playback stopped. Played ${currentIndex} of ${audioFiles.length} files.`;
+        }
+        
+        // Load files on page load
+        window.onload = loadAudioFiles;
+    </script>
+</body>
+</html>

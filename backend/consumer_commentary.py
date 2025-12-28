@@ -9,6 +9,10 @@ from typing import Any, Dict, Tuple
 from confluent_kafka import Consumer, Producer
 from google import genai
 
+from elevenlabs.client import ElevenLabs
+from elevenlabs.play import play, save
+import time
+
 
 
 # ---------------------------
@@ -32,6 +36,7 @@ def read_config(path: str = "client.properties") -> dict:
     return config
 
 client = genai.Client(api_key=os.getenv("YOUR_API_KEY"))
+elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
 
 TOPIC_PLAYER_PROFILE = os.getenv("TOPIC_PROFILE_IN", "player_profile_input")
 TOPIC_LIVE_MOVES = os.getenv("TOPIC_LIVE_MOVES", "live_moves")
@@ -42,6 +47,7 @@ AUTO_OFFSET_RESET = os.getenv("AUTO_OFFSET_RESET", "latest")
 
 COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "15"))
 MIN_MOVES_BETWEEN_COMMENTS = int(os.getenv("MIN_MOVES_BETWEEN_COMMENTS", "3"))
+AUDIO_PATH = os.path.join(PROJECT_ROOT, 'audio')
 
 
 # ---------------------------
@@ -167,7 +173,7 @@ def build_live_prompt(
         "- Focus primarily on the latest move even if you choose psychology or history.\n"
         "- Do NOT list variations, engine lines, or teach theory.\n"
         "- Sound human, opinionated, and spoken.\n"
-        "- Respond with ONE OR TWO sentences MAXIMUM — never more.\n"
+        "- Respond with ONE OR TWO sentences MAXIMUM — never more. STRICTLY UNDER 20 WORDS.\n"
         "- This should feel like live broadcast commentary, not analysis notes.\n"
     )
 
@@ -191,17 +197,44 @@ def call_llm(prompt: str) -> str:
     return response.text
     # --- CALL_LLM: END ---
 
+def get_filename():
+    """
+    Returns timestamp as text for tts filename
+    Sample return text: 'Sat_Dec_27_002210_2025'
+    """
 
-def call_elevenlabs_tts(text: str) -> tuple[bytes, str]:
+    current_time = time.asctime()
+    
+    return current_time.replace(' ', '_').replace(':', '')
+
+
+def call_elevenlabs_tts(text: str):
     """
     LABEL: CALL_ELEVENLABS
     Implement ElevenLabs TTS here.
     Return (audio_bytes, audio_format).
     """
-    print("TTS just worked")
-    # --- CALL_ELEVENLABS: START ---
-    return b"FAKEAUDIOBYTES", "mp3"
-    # --- CALL_ELEVENLABS: END ---
+
+
+    elevenlabs = ElevenLabs(
+    api_key = elevenlabs_api_key,
+    )
+
+    audio = elevenlabs.text_to_dialogue.convert(
+        inputs=[
+            {
+                "text": text,
+                "voice_id": "PdJQAOWyIMAQwD7gQcSc", # Viraj - Sports Commentor
+            }
+        ]
+    )
+
+    file_name = get_filename()
+
+    save(audio, os.path.join(AUDIO_PATH, file_name + ".mp3"))
+    
+    return f"/audio/{file_name}.mp3"
+    
 
 
 # ---------------------------
@@ -303,15 +336,26 @@ def main():
                 raw_text = call_llm(prompt)
 
                 # --- LABEL: CALL_ELEVENLABS ---
-                audio_bytes, audio_fmt = call_elevenlabs_tts(raw_text)
+                tts_url = call_elevenlabs_tts(raw_text)
+                # audio_bytes, audio_fmt = call_elevenlabs_tts(raw_text)
+
+                # out = {
+                #     "event": "commentary_audio",  # helpful in single-topic mode
+                #     "game_id": game_id,
+                #     "move_number": move_number,
+                #     "commentary_text": raw_text,
+                #     "audio_format": audio_fmt,
+                #     "audio_base64": base64.b64encode(audio_bytes).decode("utf-8"),
+                #     "created_at_ms": int(time.time() * 1000),
+                # }
 
                 out = {
-                    "event": "commentary_audio",  # helpful in single-topic mode
+                    "event": "commentary_audio",
                     "game_id": game_id,
                     "move_number": move_number,
+                    "latest_move": latest_move,
                     "commentary_text": raw_text,
-                    "audio_format": audio_fmt,
-                    "audio_base64": base64.b64encode(audio_bytes).decode("utf-8"),
+                    "audio_url": tts_url,  
                     "created_at_ms": int(time.time() * 1000),
                 }
 

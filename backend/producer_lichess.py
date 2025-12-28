@@ -81,15 +81,20 @@ def delivery_report(err, msg):
 
 
 def wait_for_profile(config: dict) -> dict:
+    import time
+    
+    # Use timestamp-based consumer group to always start fresh
+    consumer_group = f"lichess-profile-consumer-{int(time.time())}"
+    
     consumer = Consumer({
         **config,
-        "group.id": f"lichess-profile-consumer-v5",
-        "auto.offset.reset": "latest",
+        "group.id": consumer_group,
+        "auto.offset.reset": "latest",  # Only read NEW messages
     })
 
     consumer.subscribe([PROFILE_INPUT_TOPIC])
-    #consumer.poll(5.0)
-    print("[WAIT] Waiting for profile message...", flush=True)
+    print(f"[WAIT] Waiting for NEW profile message from UI... (group: {consumer_group})", flush=True)
+    print("[INFO] Please use the UI to analyze a user and send a profile.", flush=True)
 
     while True:
         msg = consumer.poll(1.0)
@@ -99,7 +104,20 @@ def wait_for_profile(config: dict) -> dict:
             raise RuntimeError(msg.error())
 
         profile_event = json.loads(msg.value())
+        
+        # Filter for player_profile events only
+        event_type = profile_event.get('event')
+        if event_type != 'player_profile':
+            print(f"[SKIP] Ignoring event type: {event_type}", flush=True)
+            continue
+        
+        # Verify it has the required fields
+        if 'username' not in profile_event:
+            print(f"[SKIP] Profile event missing username field", flush=True)
+            continue
+            
         print(f"[PROFILE_RECEIVED] username={profile_event['username']}", flush=True)
+        consumer.close()
         return profile_event
 
 

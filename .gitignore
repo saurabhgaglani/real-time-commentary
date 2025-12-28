@@ -24,3 +24,16 @@ client.properties
 
 # Binaries
 /backend/bin/
+
+# Audios
+
+audio/
+*.mp3
+
+#Kiro Helpers
+requirements.md
+design.md
+tasks.md
+DEBUGGING_SUMMARY.md
+DEBUG_DUPLICATION.md
+TESTING_GUIDE.md
