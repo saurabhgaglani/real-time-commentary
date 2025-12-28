@@ -1,5 +1,6 @@
 import React from 'react';
 import useCommentary from '../hooks/useCommentary.js';
+import CommentaryChessBoard from './CommentaryChessBoard.jsx';
 
 /**
  * CommentaryPlayer Component
@@ -9,8 +10,9 @@ import useCommentary from '../hooks/useCommentary.js';
  * 
  * @param {Object} props
  * @param {string} props.gameId - The lichess game ID to receive commentary for
+ * @param {string} props.username - The username of the player being followed
  */
-function CommentaryPlayer({ gameId }) {
+function CommentaryPlayer({ gameId, username }) {
     const {
         isConnected,
         connectionStatus,
@@ -63,58 +65,72 @@ function CommentaryPlayer({ gameId }) {
     }
 
     return (
-        <div className="commentary-player bg-gray-800 rounded-lg p-4 shadow-lg">
-            {/* Connection Status Indicator */}
-            <div className="flex items-center gap-2 mb-4">
-                <div className={`w-3 h-3 rounded-full ${getStatusStyle()}`}></div>
-                <span className="text-sm font-medium text-gray-300">
-                    {getStatusText()}
-                </span>
-            </div>
-
-            {/* Current Commentary Display */}
+        <div className="commentary-player-container">
+            {/* Chess Board - shown when we have commentary */}
             {currentCommentary && (
-                <div className="current-commentary bg-gray-700 rounded-md p-4 mb-3">
-                    <div className="move-info text-sm text-gray-400 mb-2">
-                        Move {currentCommentary.moveNumber}: <span className="font-semibold text-white">{currentCommentary.latestMove}</span>
-                    </div>
-                    <div className="commentary-text text-base text-gray-100 leading-relaxed">
-                        {currentCommentary.text}
-                    </div>
-                    {currentCommentary.isPlaying && (
-                        <div className="playing-indicator flex items-center gap-2 mt-3 text-sm text-blue-400">
-                            <span className="animate-pulse">🔊</span>
-                            <span>Playing...</span>
-                        </div>
-                    )}
+                <div className="mb-6">
+                    <CommentaryChessBoard 
+                        currentCommentary={currentCommentary}
+                        gameId={gameId}
+                        username={username}
+                    />
                 </div>
             )}
 
-            {/* Queue Status */}
-            {queueLength > 0 && (
-                <div className="queue-status bg-blue-900 bg-opacity-30 rounded-md p-2 mb-3">
-                    <span className="text-sm text-blue-300">
-                        {queueLength} {queueLength === 1 ? 'commentary' : 'commentaries'} in queue
+            {/* Commentary Player */}
+            <div className="commentary-player bg-gray-800 rounded-lg p-4 shadow-lg">
+                {/* Connection Status Indicator */}
+                <div className="flex items-center gap-2 mb-4">
+                    <div className={`w-3 h-3 rounded-full ${getStatusStyle()}`}></div>
+                    <span className="text-sm font-medium text-gray-300">
+                        {getStatusText()}
                     </span>
                 </div>
-            )}
 
-            {/* Error Display */}
-            {error && (
-                <div className="error-message bg-red-900 bg-opacity-30 border border-red-500 rounded-md p-3">
-                    <div className="flex items-start gap-2">
-                        <span className="text-red-400 text-lg">⚠️</span>
-                        <span className="text-sm text-red-300">{error}</span>
+                {/* Current Commentary Display */}
+                {currentCommentary && (
+                    <div className="current-commentary bg-gray-700 rounded-md p-4 mb-3">
+                        <div className="move-info text-sm text-gray-400 mb-2">
+                            Move {currentCommentary.moveNumber}: <span className="font-semibold text-white">{currentCommentary.latestMove}</span>
+                        </div>
+                        <div className="commentary-text text-base text-gray-100 leading-relaxed">
+                            {currentCommentary.text}
+                        </div>
+                        {currentCommentary.isPlaying && (
+                            <div className="playing-indicator flex items-center gap-2 mt-3 text-sm text-blue-400">
+                                <span className="animate-pulse">🔊</span>
+                                <span>Playing...</span>
+                            </div>
+                        )}
                     </div>
-                </div>
-            )}
+                )}
 
-            {/* Empty State */}
-            {!currentCommentary && !error && isConnected && (
-                <div className="empty-state text-center py-6 text-gray-500 text-sm">
-                    Waiting for commentary...
-                </div>
-            )}
+                {/* Queue Status */}
+                {queueLength > 0 && (
+                    <div className="queue-status bg-blue-900 bg-opacity-30 rounded-md p-2 mb-3">
+                        <span className="text-sm text-blue-300">
+                            {queueLength} {queueLength === 1 ? 'commentary' : 'commentaries'} in queue
+                        </span>
+                    </div>
+                )}
+
+                {/* Error Display */}
+                {error && (
+                    <div className="error-message bg-red-900 bg-opacity-30 border border-red-500 rounded-md p-3">
+                        <div className="flex items-start gap-2">
+                            <span className="text-red-400 text-lg">⚠️</span>
+                            <span className="text-sm text-red-300">{error}</span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Empty State */}
+                {!currentCommentary && !error && isConnected && (
+                    <div className="empty-state text-center py-6 text-gray-500 text-sm">
+                        Waiting for commentary...
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
