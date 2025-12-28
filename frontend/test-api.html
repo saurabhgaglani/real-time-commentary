@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Lichess API</title>
+</head>
+<body>
+    <h1>Lichess API Test</h1>
+    <input type="text" id="username" placeholder="Enter username" value="khongtien">
+    <button onclick="testAPI()">Test API</button>
+    <div id="result"></div>
+
+    <script>
+        async function testAPI() {
+            const username = document.getElementById('username').value;
+            const resultDiv = document.getElementById('result');
+            
+            try {
+                console.log(`Testing API for username: ${username}`);
+                
+                const response = await fetch(`https://lichess.org/api/user/${username}/current-game`, {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const gameData = await response.json();
+                console.log('API Response:', gameData);
+                
+                // Extract moves exactly like our component does
+                const moves = gameData.moves ? gameData.moves.split(' ').filter(m => m.trim()) : [];
+                
+                // Determine player color exactly like our component does
+                let playerColor = 'white';
+                if (gameData.players?.white?.user?.name?.toLowerCase() === username.toLowerCase()) {
+                    playerColor = 'white';
+                } else if (gameData.players?.black?.user?.name?.toLowerCase() === username.toLowerCase()) {
+                    playerColor = 'black';
+                }
+                
+                resultDiv.innerHTML = `
+                    <h3>✅ API Test Successful</h3>
+                    <p><strong>Game ID:</strong> ${gameData.id}</p>
+                    <p><strong>Player Color:</strong> ${playerColor}</p>
+                    <p><strong>Total Moves:</strong> ${moves.length}</p>
+                    <p><strong>Moves:</strong> ${moves.join(', ')}</p>
+                    <p><strong>Status:</strong> ${gameData.status}</p>
+                    <pre>${JSON.stringify(gameData, null, 2)}</pre>
+                `;
+                
+            } catch (error) {
+                console.error('API Test Failed:', error);
+                resultDiv.innerHTML = `
+                    <h3>❌ API Test Failed</h3>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
