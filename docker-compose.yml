@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: chess-commentary-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Kafka Configuration (must be provided via .env file or environment)
+      - KAFKA_CONFIG=/app/config/client.properties
+      - TOPIC_PROFILE_IN=${TOPIC_PROFILE_IN:-chess_stream}
+      - TOPIC_LIVE_MOVES=${TOPIC_LIVE_MOVES:-chess_stream}
+      - TOPIC_SESSION_EVENTS=${TOPIC_SESSION_EVENTS:-chess_stream}
+      - TOPIC_OUT_AUDIO=${TOPIC_OUT_AUDIO:-chess_stream}
+      - TOPIC_COMMENTARY_AUDIO=${TOPIC_COMMENTARY_AUDIO:-chess_stream}
+      # API Keys (must be provided)
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - YOUR_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      # Mount Kafka config from host (not included in image)
+      - ./client.properties:/app/config/client.properties:ro
+      # Persist audio files
+      - audio-data:/app/audio
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Commentary Consumer Service
+  consumer-commentary:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: chess-commentary-consumer
+    command: ["python", "-u", "backend/consumer_commentary.py"]
+    environment:
+      - KAFKA_CONFIG=/app/config/client.properties
+      - TOPIC_PROFILE_IN=${TOPIC_PROFILE_IN:-chess_stream}
+      - TOPIC_LIVE_MOVES=${TOPIC_LIVE_MOVES:-chess_stream}
+      - TOPIC_OUT_AUDIO=${TOPIC_OUT_AUDIO:-chess_stream}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - YOUR_API_KEY=${GEMINI_API_KEY}
+      - KAFKA_GROUP_ID=${KAFKA_GROUP_ID:-commentary-consumer-group-1}
+      - AUTO_OFFSET_RESET=${AUTO_OFFSET_RESET:-latest}
+    volumes:
+      - ./client.properties:/app/config/client.properties:ro
+      - audio-data:/app/audio
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  # Lichess Producer Service
+  producer-lichess:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: chess-commentary-producer
+    command: ["python", "-u", "backend/producer_lichess.py"]
+    environment:
+      - KAFKA_CONFIG=/app/config/client.properties
+      - TOPIC_PROFILE_IN=${TOPIC_PROFILE_IN:-chess_stream}
+      - TOPIC_LIVE_MOVES=${TOPIC_LIVE_MOVES:-chess_stream}
+      - TOPIC_SESSION_EVENTS=${TOPIC_SESSION_EVENTS:-chess_stream}
+      - POLL_SECONDS=${POLL_SECONDS:-1.0}
+    volumes:
+      - ./client.properties:/app/config/client.properties:ro
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  # Frontend Service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: chess-commentary-frontend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  audio-data:
+    driver: local

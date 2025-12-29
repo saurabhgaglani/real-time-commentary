@@ -1,0 +1,145 @@
+# Production Docker Compose Configuration
+# Use this for production deployments with proper resource limits and security
+
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: chess-commentary-backend-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - KAFKA_CONFIG=/app/config/client.properties
+      - TOPIC_PROFILE_IN=${TOPIC_PROFILE_IN:-chess_stream}
+      - TOPIC_LIVE_MOVES=${TOPIC_LIVE_MOVES:-chess_stream}
+      - TOPIC_SESSION_EVENTS=${TOPIC_SESSION_EVENTS:-chess_stream}
+      - TOPIC_OUT_AUDIO=${TOPIC_OUT_AUDIO:-chess_stream}
+      - TOPIC_COMMENTARY_AUDIO=${TOPIC_COMMENTARY_AUDIO:-chess_stream}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - YOUR_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./client.properties:/app/config/client.properties:ro
+      - audio-data:/app/audio
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  consumer-commentary:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: chess-commentary-consumer-prod
+    command: ["python", "-u", "backend/consumer_commentary.py"]
+    environment:
+      - KAFKA_CONFIG=/app/config/client.properties
+      - TOPIC_PROFILE_IN=${TOPIC_PROFILE_IN:-chess_stream}
+      - TOPIC_LIVE_MOVES=${TOPIC_LIVE_MOVES:-chess_stream}
+      - TOPIC_OUT_AUDIO=${TOPIC_OUT_AUDIO:-chess_stream}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - YOUR_API_KEY=${GEMINI_API_KEY}
+      - KAFKA_GROUP_ID=${KAFKA_GROUP_ID:-commentary-consumer-group-1}
+      - AUTO_OFFSET_RESET=${AUTO_OFFSET_RESET:-latest}
+    volumes:
+      - ./client.properties:/app/config/client.properties:ro
+      - audio-data:/app/audio
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  producer-lichess:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: chess-commentary-producer-prod
+    command: ["python", "-u", "backend/producer_lichess.py"]
+    environment:
+      - KAFKA_CONFIG=/app/config/client.properties
+      - TOPIC_PROFILE_IN=${TOPIC_PROFILE_IN:-chess_stream}
+      - TOPIC_LIVE_MOVES=${TOPIC_LIVE_MOVES:-chess_stream}
+      - TOPIC_SESSION_EVENTS=${TOPIC_SESSION_EVENTS:-chess_stream}
+      - POLL_SECONDS=${POLL_SECONDS:-1.0}
+    volumes:
+      - ./client.properties:/app/config/client.properties:ro
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    depends_on:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: chess-commentary-frontend-prod
+    ports:
+      - "80:80"
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    depends_on:
+      - backend
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  audio-data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
