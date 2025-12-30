@@ -1,9 +1,13 @@
 # Live Chess Commentary — Real-Time Personalized AI Commentary for Chess Games
 
 > Built for the **Google Cloud × Datadog × Confluent × ElevenLabs Hackathon (2025)**  
-> Challenge Tracks: **Confluent (Primary)**, **ElevenLabs (Primary)** 
-<br>
-[![Video Title](https://img.youtube.com/vi/EOFJqLg6xrY/0.jpg)](https://www.youtube.com/watch?v=EOFJqLg6xrY&t=2s)   
+> Challenge Tracks: **Confluent (Primary)**, **ElevenLabs (Primary)**
+>
+## DEMO VIDEO
+> 
+[![Demo Video](https://img.youtube.com/vi/EOFJqLg6xrY/hqdefault.jpg)](https://www.youtube.com/watch?v=EOFJqLg6xrY)
+
+> 
 ---
 
 ## Idea
