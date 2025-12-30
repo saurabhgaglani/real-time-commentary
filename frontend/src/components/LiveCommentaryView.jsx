@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import CommentaryChessBoard from './CommentaryChessBoard.jsx';
 import useCommentary from '../hooks/useCommentary.js';
 
@@ -22,6 +22,13 @@ function LiveCommentaryView({ gameId, username }) {
 
     const [gameInfo, setGameInfo] = useState(null);
     const [timeRemaining, setTimeRemaining] = useState({ white: null, black: null });
+    const [lastMoveTime, setLastMoveTime] = useState(null);
+    const [currentTurn, setCurrentTurn] = useState('white');
+    const [isTimerRunning, setIsTimerRunning] = useState(false);
+    
+    // Timer refs
+    const timerIntervalRef = useRef(null);
+    const lastUpdateTimeRef = useRef(null);
 
     // Fetch game info for player names, ratings, etc.
     useEffect(() => {
@@ -34,9 +41,24 @@ function LiveCommentaryView({ gameId, username }) {
                     
                     // Set initial time if available
                     if (data.clock) {
+                        const initialWhiteTime = data.clock.white || 600; // Default 10 minutes
+                        const initialBlackTime = data.clock.black || 600;
+                        
                         setTimeRemaining({
-                            white: data.clock.white || null,
-                            black: data.clock.black || null
+                            white: initialWhiteTime,
+                            black: initialBlackTime
+                        });
+                        
+                        // Determine whose turn it is based on move count
+                        const moves = data.moves ? data.moves.split(' ').filter(m => m.trim()) : [];
+                        const isWhiteTurn = moves.length % 2 === 0;
+                        setCurrentTurn(isWhiteTurn ? 'white' : 'black');
+                        
+                        console.log('🕐 Initial timer setup:', {
+                            white: initialWhiteTime,
+                            black: initialBlackTime,
+                            turn: isWhiteTurn ? 'white' : 'black',
+                            moves: moves.length
                         });
                     }
                 }
@@ -47,11 +69,89 @@ function LiveCommentaryView({ gameId, username }) {
 
         if (username) {
             fetchGameInfo();
-            // Refresh game info every 30 seconds
+            // Refresh game info every 30 seconds for time sync
             const interval = setInterval(fetchGameInfo, 30000);
             return () => clearInterval(interval);
         }
     }, [username]);
+
+    // Timer management based on commentary moves
+    useEffect(() => {
+        if (currentCommentary && timeRemaining.white !== null && timeRemaining.black !== null) {
+            const moveNumber = currentCommentary.moveNumber;
+            
+            // Stop timer when new move commentary arrives
+            if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+                timerIntervalRef.current = null;
+                setIsTimerRunning(false);
+                console.log('⏸️ Timer stopped for new move commentary');
+            }
+            
+            // Update whose turn it is based on move number
+            const isWhiteTurn = moveNumber % 2 === 1; // Odd moves = white's turn next
+            const newTurn = isWhiteTurn ? 'white' : 'black';
+            setCurrentTurn(newTurn);
+            setLastMoveTime(Date.now());
+            
+            console.log('🎯 Move commentary received:', {
+                moveNumber,
+                nextTurn: newTurn,
+                whiteTime: timeRemaining.white,
+                blackTime: timeRemaining.black
+            });
+            
+            // Start timer for the player whose turn it is
+            setTimeout(() => {
+                startTimer(newTurn);
+            }, 1000); // Small delay to show the move was played
+        }
+    }, [currentCommentary, timeRemaining.white, timeRemaining.black]);
+
+    // Start countdown timer for current player
+    const startTimer = (playerColor) => {
+        if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+        }
+        
+        setIsTimerRunning(true);
+        lastUpdateTimeRef.current = Date.now();
+        
+        console.log(`▶️ Starting timer for ${playerColor}`);
+        
+        timerIntervalRef.current = setInterval(() => {
+            const now = Date.now();
+            const elapsed = Math.floor((now - lastUpdateTimeRef.current) / 1000);
+            
+            if (elapsed >= 1) {
+                setTimeRemaining(prev => {
+                    const newTime = { ...prev };
+                    newTime[playerColor] = Math.max(0, newTime[playerColor] - elapsed);
+                    
+                    // Stop timer if time runs out
+                    if (newTime[playerColor] <= 0) {
+                        clearInterval(timerIntervalRef.current);
+                        timerIntervalRef.current = null;
+                        setIsTimerRunning(false);
+                        console.log(`⏰ Time up for ${playerColor}!`);
+                    }
+                    
+                    return newTime;
+                });
+                
+                lastUpdateTimeRef.current = now;
+            }
+        }, 100); // Update every 100ms for smooth countdown
+    };
+
+    // Cleanup timer on unmount
+    useEffect(() => {
+        return () => {
+            if (timerIntervalRef.current) {
+                clearInterval(timerIntervalRef.current);
+            }
+        };
+    }, []);
 
     const formatTime = (seconds) => {
         if (!seconds) return '--:--';
@@ -115,7 +215,11 @@ function LiveCommentaryView({ gameId, username }) {
                                 <h2 className="text-lg font-semibold mb-4 text-center">Players</h2>
                                 
                                 {/* White Player */}
-                                <div className="mb-4 p-4 bg-white/5 rounded-lg">
+                                <div className={`mb-4 p-4 rounded-lg transition-all ${
+                                    currentTurn === 'white' && isTimerRunning 
+                                        ? 'bg-yellow-500/20 border-2 border-yellow-500' 
+                                        : 'bg-white/5'
+                                }`}>
                                     <div className="flex items-center justify-between mb-2">
                                         <div className="flex items-center gap-3">
                                             <div className="w-6 h-6 bg-white rounded border-2 border-gray-600"></div>
@@ -132,9 +236,18 @@ function LiveCommentaryView({ gameId, username }) {
                                             </div>
                                         </div>
                                         <div className="text-right">
-                                            <div className="text-lg font-mono">
+                                            <div className={`text-lg font-mono transition-colors ${
+                                                currentTurn === 'white' && isTimerRunning 
+                                                    ? 'text-yellow-400 animate-pulse' 
+                                                    : 'text-white'
+                                            }`}>
                                                 {formatTime(timeRemaining.white)}
                                             </div>
+                                            {currentTurn === 'white' && isTimerRunning && (
+                                                <div className="text-xs text-yellow-400">
+                                                    ⏱️ Thinking...
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -145,7 +258,11 @@ function LiveCommentaryView({ gameId, username }) {
                                 </div>
 
                                 {/* Black Player */}
-                                <div className="p-4 bg-white/5 rounded-lg">
+                                <div className={`p-4 rounded-lg transition-all ${
+                                    currentTurn === 'black' && isTimerRunning 
+                                        ? 'bg-yellow-500/20 border-2 border-yellow-500' 
+                                        : 'bg-white/5'
+                                }`}>
                                     <div className="flex items-center justify-between mb-2">
                                         <div className="flex items-center gap-3">
                                             <div className="w-6 h-6 bg-gray-800 rounded border-2 border-gray-400"></div>
@@ -162,9 +279,18 @@ function LiveCommentaryView({ gameId, username }) {
                                             </div>
                                         </div>
                                         <div className="text-right">
-                                            <div className="text-lg font-mono">
+                                            <div className={`text-lg font-mono transition-colors ${
+                                                currentTurn === 'black' && isTimerRunning 
+                                                    ? 'text-yellow-400 animate-pulse' 
+                                                    : 'text-white'
+                                            }`}>
                                                 {formatTime(timeRemaining.black)}
                                             </div>
+                                            {currentTurn === 'black' && isTimerRunning && (
+                                                <div className="text-xs text-yellow-400">
+                                                    ⏱️ Thinking...
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

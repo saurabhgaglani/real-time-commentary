@@ -45,7 +45,7 @@ TOPIC_OUT_AUDIO = os.getenv("TOPIC_OUT_AUDIO", "commentary_audio")
 GROUP_ID = os.getenv("KAFKA_GROUP_ID", "commentary-consumer-group-1")
 AUTO_OFFSET_RESET = os.getenv("AUTO_OFFSET_RESET", "latest")
 
-COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "15"))
+COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "2"))
 MIN_MOVES_BETWEEN_COMMENTS = int(os.getenv("MIN_MOVES_BETWEEN_COMMENTS", "3"))
 AUDIO_PATH = os.path.join(PROJECT_ROOT, 'audio')
 
@@ -119,24 +119,15 @@ def build_initial_prompt(
     username_color = get_player_color(snap, st.username)
 
     return (
-        "You are a world-class chess commentator in the style of Judit Polgar.\n\n"
-        "This is the FIRST commentary of the game — the live broadcast opening.\n\n"
-        f"We are following the player '{st.username}', playing as {username_color}.\n\n"
-        "Player profile (long-term identity, habits, psychology):\n"
-        f"{profile_str}\n\n"
-        "Current game snapshot (may include opponent rating, time control, and move list):\n"
-        f"{snap_str}\n\n"
-        "Instructions:\n"
-        "- Welcome the audience as if they are just tuning in.\n"
-        "- Use the snapshot to set the stakes (rating gap, colors, time control, recent form).\n"
-        "- If the move list is EMPTY or absent, build anticipation and tension before the first blow.\n"
-        "- If the move list EXISTS, briefly frame the opening direction and early intentions without naming theory.\n"
-        "- Emphasize the psychological and physical toll of competitive chess.\n\n"
-        "Output rules (VERY IMPORTANT):\n"
-        "- Respond with EXACTLY ONE spoken sentence.\n"
-        "- Sound like live commentary, not analysis or narration.\n"
-        "- Be opinionated, confident, and human.\n"
-        "- Do NOT explain rules, openings, or teach the audience.\n"
+        "You are a world-class live chess commentator delivering the broadcast opening.\n\n"
+        f"We are following '{st.username}' as {username_color}.\n\n"
+        "Use this player profile and game snapshot:\n"
+        f"PROFILE:\n{profile_str}\n\n"
+        f"SNAPSHOT:\n{snap_str}\n\n"
+        "Write ONE single spoken sentence that sounds like a human on live TV.\n"
+        "Make it feel mid-flow and confident.\n"
+        "Anchor the sentence on the player’s recent form from the profile: last week, month, year, and any White-vs-Black trend.\n"
+        "Use the snapshot only to set stakes (time control/ratings/colors).\n"
     )
 
 
@@ -152,7 +143,7 @@ def build_live_prompt(
     print("LATEST MOVE IN PROMPT BUILDING : ", latest_move)
 
     return (
-        "You are a world-class live chess commentator.\n\n"
+        "You are providing live chess commentary in a broadcast already in progress.\n\n"
         f"We are following the player '{st.username}', playing as {username_color}.\n\n"
         f"Player that just moved is {player_colour}.\n\n"
         "Player profile (long-term identity, habits, psychology, recent form):\n"
@@ -160,21 +151,32 @@ def build_live_prompt(
         "Current game snapshot (position, opponent rating, time control, opening, move list):\n"
         f"{snap_str}\n\n"
         f"The latest move just played is: {latest_move}\n\n"
+        "ABSOLUTE OUTPUT CONSTRAINT (MANDATORY):\n"
+        "- Output MUST be 20 words or fewer.\n"
+        "- Output MUST be exactly 1 or 2 short sentences.\n"
+        "- If output exceeds 20 words, it is INVALID and WRONG.\n\n"
+        "LANGUAGE CONSTRAINT:\n"
+        "- Sentences must be short, spoken, and natural.\n"
+        "- No long clauses. No stacked ideas.\n\n"
+        "BEFORE OUTPUT:\n"
+        "- Silently count words.\n"
+        "- Silently count sentences.\n"
+        "- Reduce until BOTH limits are satisfied.\n\n"
         "Your task:\n"
         "- React to the latest move as live commentary.\n"
-        "- RANDOMLY choose ONE of the following commentary angles.\n"
-        "- Weight your choice toward the first two options most of the time.\n\n"
-        "Commentary angle options (choose ONE at random):\n"
-        "1) What the latest move does to the position and why it matters (MOST COMMON)\n"
-        "2) Why the player likely chose this move right now, based on intent or pressure (MOST COMMON)\n"
-        "3) What this move reveals about the player’s psychology, habits, or current form\n"
-        "4) A brief historical or stylistic insight related to the opening or structure\n\n"
-        "Rules:\n"
-        "- Focus primarily on the latest move even if you choose psychology or history.\n"
-        "- Do NOT list variations, engine lines, or teach theory.\n"
-        "- Sound human, opinionated, and spoken.\n"
-        "- Respond with ONE OR TWO sentences MAXIMUM — never more. STRICTLY UNDER 20 WORDS.\n"
-        "- This should feel like live broadcast commentary, not analysis notes.\n"
+        "- RANDOMLY choose ONE commentary angle.\n"
+        "- Bias heavily toward the first two options.\n\n"
+        "Commentary angle options (choose ONE):\n"
+        "1) What the move does to the position and why it matters(from snapshot given above) (MOST COMMON)\n"
+        "3) Why this players recent form might factor into the move he has played(from player profile given above)\n"
+        "4) A brief stylistic or historical insight(from player profile given above)\n\n"
+        "STRICT RULES:\n"
+        "- No introductions or acknowledgements.\n"
+        "- No restarts or recap language.\n"
+        "- No engine evaluations or theory.\n"
+        "- Mid-broadcast tone only.\n"
+        "- Confident, human, flowing speech.\n"
+        "- Under NO circumstances output more than 20 words.\n"
     )
 
 
@@ -208,13 +210,20 @@ def get_filename():
     return current_time.replace(' ', '_').replace(':', '')
 
 
-def call_elevenlabs_tts(text: str):
+def call_elevenlabs_tts(text: str, temp_move_number: int):
     """
     LABEL: CALL_ELEVENLABS
     Implement ElevenLabs TTS here.
     Return (audio_bytes, audio_format).
     """
 
+    voice_id = ""
+   
+    if temp_move_number %2==0:
+        voice_id = "Cvv0EXhC1Zv7b4a2QfWl" # Monika - Sports Commentator
+    else:
+        voice_id = "PdJQAOWyIMAQwD7gQcSc" # Viraj - Sports Commentor
+    
 
     elevenlabs = ElevenLabs(
     api_key = elevenlabs_api_key,
@@ -224,7 +233,7 @@ def call_elevenlabs_tts(text: str):
         inputs=[
             {
                 "text": text,
-                "voice_id": "PdJQAOWyIMAQwD7gQcSc", # Viraj - Sports Commentor
+                "voice_id": voice_id, 
             }
         ]
     )
@@ -317,38 +326,36 @@ def main():
                     flush=True,
                 )
 
-                # Open for conditions where we want to limit commentary
-                # if not decision:
-                #     continue
+                # Check if we already commented on this move
+                if st.last_commentary_move >= move_number:
+                    print(f"[SKIP] Already commented on move {move_number} (last: {st.last_commentary_move})", flush=True)
+                    continue
+
+                # Add cooldown to prevent spam
+                current_time = time.time()
+                if current_time - st.last_commentary_ts < COOLDOWN_SECONDS:
+                    print(f"[COOLDOWN] Skipping move {move_number} - too soon after last commentary", flush=True)
+                    continue
 
                 print("BUILDING PROMPT")
 
+                # Properly handle first commentary flag
                 if st.is_first_commentary:
                     print("CALLING LLM - FIRST COMMENTARY")
                     prompt = build_initial_prompt(st, snap)
+                    st.is_first_commentary = False  # Reset flag after first use
                 else:
                     print("CALLING LLM")
                     prompt = build_live_prompt(st, player_colour, latest_move, snap)
 
-
-
                 # --- LABEL: CALL_LLM ---
                 raw_text = call_llm(prompt)
+                
+                #switching commentators
+                temp_move_number = int(move_number)
 
                 # --- LABEL: CALL_ELEVENLABS ---
-                tts_url = call_elevenlabs_tts(raw_text)
-                # audio_bytes, audio_fmt = call_elevenlabs_tts(raw_text)
-
-                # out = {
-                #     "event": "commentary_audio",  # helpful in single-topic mode
-                #     "game_id": game_id,
-                #     "move_number": move_number,
-                #     "commentary_text": raw_text,
-                #     "audio_format": audio_fmt,
-                #     "audio_base64": base64.b64encode(audio_bytes).decode("utf-8"),
-                #     "created_at_ms": int(time.time() * 1000),
-                # }
-
+                tts_url = call_elevenlabs_tts(raw_text, temp_move_number)
                 out = {
                     "event": "commentary_audio",
                     "game_id": game_id,
@@ -367,7 +374,8 @@ def main():
                 )
                 producer.flush()
 
-                st.last_commentary_ts = time.time()
+                # CRITICAL FIX: Update state AFTER successful commentary
+                st.last_commentary_ts = current_time
                 st.last_commentary_move = move_number
 
                 print(f"[AUDIO] emitted game_id={game_id} move={move_number}", flush=True)
