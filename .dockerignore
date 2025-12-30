@@ -1,0 +1,66 @@
+# Environment files
+.env
+.env.*
+client.properties
+*.properties
+
+# Kiro files
+.kiro/
+.kiro
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+commentary_venv/
+venv/
+ENV/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+README.md
+LICENSE
+
+# Test files
+test_*.py
+test_*.html
+*_test.py
+notebooks/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Audio files (will be generated at runtime)
+audio/
+
+# User data
+user_*.json
+
+# Debug files
+DEBUG_*.md
+DEBUGGING_*.md
+TESTING_*.md

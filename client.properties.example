@@ -1,0 +1,14 @@
+# Kafka Configuration Template
+# Copy this file to client.properties and fill in your Confluent Cloud credentials
+
+# Confluent Cloud Bootstrap Servers
+bootstrap.servers=your-cluster.region.provider.confluent.cloud:9092
+
+# Security Configuration
+security.protocol=SASL_SSL
+sasl.mechanisms=PLAIN
+sasl.username=your-api-key
+sasl.password=your-api-secret
+
+# Session timeout
+session.timeout.ms=45000
