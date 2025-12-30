@@ -20,11 +20,22 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
     const [moveHistory, setMoveHistory] = useState([]);
     const [playerColor, setPlayerColor] = useState('white');
     const [error, setError] = useState(null);
+    const [lastMoveSquares, setLastMoveSquares] = useState({ from: null, to: null });
     
     // Store the complete move list from PGN (fetch once, use many times)
     const gameMoveListRef = useRef([]);
     const initialSetupRef = useRef(false);
     const lastFetchedGameRef = useRef(null);
+
+    // Debug logging
+    console.log('🔍 CommentaryChessBoard render:', {
+        gameId,
+        username,
+        hasCommentary: !!currentCommentary,
+        isInitialized,
+        boardPosition: boardPosition.substring(0, 20) + '...',
+        lastProcessedMove
+    });
 
     /**
      * Fetch current game using the correct Lichess API
@@ -105,6 +116,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
             console.log('🔄 Rebuilding from scratch for accuracy');
             const newGame = new Chess();
             const newMoveHistory = [];
+            let lastMoveInfo = { from: null, to: null };
             
             // Play all moves up to target
             for (let i = 0; i < targetMoveNumber && i < gameMoveListRef.current.length; i++) {
@@ -123,6 +135,16 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                             fen: newGame.fen(),
                             moveNumber: Math.ceil((i + 1) / 2)
                         });
+                        
+                        // Capture the last move's squares for highlighting
+                        if (i === targetMoveNumber - 1) {
+                            lastMoveInfo = {
+                                from: moveResult.from,
+                                to: moveResult.to
+                            };
+                            console.log(`🎯 Last move squares: ${moveResult.from} -> ${moveResult.to}`);
+                        }
+                        
                         console.log(`✓ Move ${i + 1}: ${moveStr} -> ${moveResult.san}`);
                     } else {
                         console.error(`❌ Could not apply move ${i + 1}: ${moveStr}`);
@@ -140,6 +162,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
             return {
                 game: newGame,
                 moveHistory: newMoveHistory,
+                lastMoveSquares: lastMoveInfo,
                 success: true
             };
             
@@ -148,6 +171,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
             return {
                 game: new Chess(),
                 moveHistory: [],
+                lastMoveSquares: { from: null, to: null },
                 success: false,
                 error: error.message
             };
@@ -155,16 +179,21 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
     };
 
     /**
-     * Initialize the board when first commentary arrives
+     * Initialize the board when gameId and username are available OR when first commentary arrives
      */
     useEffect(() => {
-        if (currentCommentary && !initialSetupRef.current && username && gameId) {
-            console.log('🚀 Initializing chess board with first commentary:', currentCommentary);
+        // Initialize if we have gameId/username but haven't initialized yet
+        // OR if we get commentary but haven't initialized yet
+        const shouldInitialize = (gameId && username && !initialSetupRef.current) || 
+                                (currentCommentary && !initialSetupRef.current);
+        
+        if (shouldInitialize) {
+            console.log('🚀 Initializing chess board - gameId:', gameId, 'username:', username, 'hasCommentary:', !!currentCommentary);
             initialSetupRef.current = true;
             setIsInitialized(true);
             setError(null);
             
-            // Fetch the complete move list once
+            // Fetch the complete move list and initialize
             const initializeGame = async () => {
                 console.log('📡 Fetching game moves for initialization...');
                 const { moves, playerColor, success, error: fetchError } = await fetchGameMoves();
@@ -176,33 +205,64 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                     console.log('✅ Game initialized successfully:');
                     console.log(`   - Total moves: ${moves.length}`);
                     console.log(`   - Player color: ${playerColor}`);
-                    console.log(`   - First 10 moves: ${moves.slice(0, 10).join(' ')}`);
                     
-                    // Immediately build to the current commentary position
+                    // Determine what position to show
+                    let targetMoveNumber = moves.length; // Default to current live position
+                    
+                    // If we have commentary, use that move number instead
                     if (currentCommentary && currentCommentary.moveNumber > 0) {
-                        console.log(`🎯 Building to commentary position: move ${currentCommentary.moveNumber}`);
-                        const { game: newGame, moveHistory: newMoveHistory, success: buildSuccess } = buildGameIncrementally(currentCommentary.moveNumber);
+                        targetMoveNumber = currentCommentary.moveNumber;
+                        console.log(`🎯 Using commentary position: move ${targetMoveNumber}`);
+                    } else if (moves.length > 0) {
+                        console.log(`🎯 Using live position: ${moves.length} moves`);
+                    } else {
+                        console.log(`📋 No moves yet, showing starting position`);
+                        targetMoveNumber = 0;
+                    }
+                    
+                    // Build the position
+                    if (targetMoveNumber > 0) {
+                        const { game: newGame, moveHistory: newMoveHistory, lastMoveSquares: moveSquares, success: buildSuccess } = buildGameIncrementally(targetMoveNumber);
                         
                         if (buildSuccess) {
                             setGame(newGame);
                             setBoardPosition(newGame.fen());
                             setMoveHistory(newMoveHistory);
-                            setLastProcessedMove(currentCommentary.moveNumber);
-                            console.log('✅ Initial position set successfully');
+                            setLastMoveSquares(moveSquares);
+                            setLastProcessedMove(targetMoveNumber);
+                            console.log('✅ Position set successfully');
                         }
+                    } else {
+                        // Starting position
+                        const newGame = new Chess();
+                        setGame(newGame);
+                        setBoardPosition(newGame.fen());
+                        setMoveHistory([]);
+                        setLastMoveSquares({ from: null, to: null });
+                        setLastProcessedMove(0);
+                        console.log('✅ Starting position set');
                     }
                 } else {
                     console.error('❌ Failed to initialize game:', fetchError);
                     setError(`Failed to fetch game: ${fetchError}`);
+                    
+                    // Fallback to starting position so board still shows
+                    const newGame = new Chess();
+                    setGame(newGame);
+                    setBoardPosition(newGame.fen());
+                    setMoveHistory([]);
+                    setLastMoveSquares({ from: null, to: null });
+                    setLastProcessedMove(0);
+                    console.log('⚠️ Fallback to starting position');
                 }
             };
             
             initializeGame();
         }
-    }, [currentCommentary, username, gameId]);
+    }, [gameId, username, currentCommentary]); // Watch all three
 
     /**
-     * Process new moves when commentary arrives
+     * Update board when commentary arrives (but board is already initialized)
      */
     useEffect(() => {
         if (!currentCommentary || !isInitialized || !username) return;
@@ -210,7 +270,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
         const currentMoveNumber = currentCommentary.moveNumber;
         const latestMove = currentCommentary.latestMove;
         
-        console.log(`🎯 NEW COMMENTARY RECEIVED:`);
+        console.log(`🎯 COMMENTARY RECEIVED:`);
         console.log(`   - Move Number: ${currentMoveNumber}`);
         console.log(`   - Latest Move: ${latestMove}`);
         console.log(`   - Last Processed: ${lastProcessedMove}`);
@@ -231,13 +291,14 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                     setPlayerColor(playerColor);
                     
                     // Now build the position with updated moves
-                    const { game: newGame, moveHistory: newMoveHistory, success: buildSuccess, error: buildError } = buildGameIncrementally(currentMoveNumber);
+                    const { game: newGame, moveHistory: newMoveHistory, lastMoveSquares: moveSquares, success: buildSuccess, error: buildError } = buildGameIncrementally(currentMoveNumber);
                     
                     if (buildSuccess) {
                         console.log(`📍 Setting new position: ${newGame.fen()}`);
                         setGame(newGame);
                         setBoardPosition(newGame.fen());
                         setMoveHistory(newMoveHistory);
+                        setLastMoveSquares(moveSquares);
                         setLastProcessedMove(currentMoveNumber);
                         setError(null);
                         
@@ -256,21 +317,22 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
             return; // Don't continue with stale data
         }
         
-        // Normal update with existing data
-        if (gameMoveListRef.current.length > 0 && currentMoveNumber > 0) {
-            console.log(`🔄 NORMAL UPDATE to move ${currentMoveNumber}`);
+        // Normal update with existing data - only if commentary is for a different move
+        if (gameMoveListRef.current.length > 0 && currentMoveNumber > 0 && currentMoveNumber !== lastProcessedMove) {
+            console.log(`🔄 UPDATING to commentary move ${currentMoveNumber}`);
             
-            const { game: newGame, moveHistory: newMoveHistory, success, error: buildError } = buildGameIncrementally(currentMoveNumber);
+            const { game: newGame, moveHistory: newMoveHistory, lastMoveSquares: moveSquares, success, error: buildError } = buildGameIncrementally(currentMoveNumber);
             
             if (success) {
                 console.log(`📍 Setting new position: ${newGame.fen()}`);
                 setGame(newGame);
                 setBoardPosition(newGame.fen());
                 setMoveHistory(newMoveHistory);
+                setLastMoveSquares(moveSquares);
                 setLastProcessedMove(currentMoveNumber);
                 setError(null);
                 
-                console.log(`✅ BOARD UPDATED SUCCESSFULLY`);
+                console.log(`✅ BOARD UPDATED FOR COMMENTARY`);
                 console.log(`   - New FEN: ${newGame.fen()}`);
                 console.log(`   - Move History Length: ${newMoveHistory.length}`);
             } else {
@@ -278,9 +340,9 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                 setError(`Failed to build position: ${buildError}`);
             }
         } else {
-            console.log(`⚠️ CANNOT UPDATE: moves=${gameMoveListRef.current.length}, moveNum=${currentMoveNumber}`);
+            console.log(`⏸️ No board update needed - same move or invalid data`);
         }
-    }, [currentCommentary]); // Only depend on currentCommentary to force updates
+    }, [currentCommentary]); // Only depend on currentCommentary
 
     /**
      * Reset board when game changes
@@ -294,6 +356,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
             setBoardPosition('start');
             setLastProcessedMove(0);
             setMoveHistory([]);
+            setLastMoveSquares({ from: null, to: null });
             setError(null);
             gameMoveListRef.current = [];
             lastFetchedGameRef.current = null;
@@ -301,13 +364,51 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
     }, [gameId]);
 
     if (!isInitialized) {
+        // Show loading state but also try to show a basic board if we have the data
+        if (gameId && username) {
+            return (
+                <div className="chess-board-container">
+                    <div className="mb-6">
+                        <h3 className="text-xl font-semibold text-white mb-3">
+                            Game Position
+                        </h3>
+                        <div className="flex justify-between text-sm text-gray-300 mb-4">
+                            <span>Loading game data...</span>
+                            <span>Following: {username}</span>
+                        </div>
+                    </div>
+                    
+                    <div className="chess-board-wrapper mb-6 flex justify-center">
+                        <div className="bg-white/10 p-4 rounded-xl backdrop-blur-sm">
+                            <Chessboard
+                                position="start"
+                                boardOrientation="white"
+                                arePiecesDraggable={false}
+                                boardWidth={500}
+                                customBoardStyle={{
+                                    borderRadius: '12px',
+                                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
+                                }}
+                                customDarkSquareStyle={{ backgroundColor: '#4a5568' }}
+                                customLightSquareStyle={{ backgroundColor: '#e2e8f0' }}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="text-center text-gray-400">
+                        <p>Initializing live game position...</p>
+                    </div>
+                </div>
+            );
+        }
+        
         return (
             <div className="chess-board-container bg-gray-100 rounded-lg p-6 text-center">
                 <div className="text-gray-600 mb-4">
                     <div className="w-16 h-16 mx-auto mb-4 bg-gray-300 rounded-lg flex items-center justify-center">
                         <span className="text-2xl">♔</span>
                     </div>
-                    <p>Waiting for first commentary to initialize board...</p>
+                    <p>Loading live game position...</p>
                     {username && (
                         <p className="text-sm text-gray-500 mt-2">
                             Following: {username}
@@ -348,7 +449,21 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                         }}
                         customDarkSquareStyle={{ backgroundColor: '#4a5568' }}
                         customLightSquareStyle={{ backgroundColor: '#e2e8f0' }}
-                        animationDuration={200}
+                        customSquareStyles={{
+                            ...(lastMoveSquares.from && {
+                                [lastMoveSquares.from]: {
+                                    backgroundColor: 'rgba(255, 255, 0, 0.88)',
+                                    boxShadow: 'inset 0 0 0 2px rgba(255, 255, 0, 0.8)'
+                                }
+                            }),
+                            ...(lastMoveSquares.to && {
+                                [lastMoveSquares.to]: {
+                                    backgroundColor: 'rgba(236, 236, 3, 0.93)',
+                                    boxShadow: 'inset 0 0 0 2px rgba(255, 255, 0, 0.8)'
+                                }
+                            })
+                        }}
+                        animationDuration={300}
                     />
                 </div>
             </div>
