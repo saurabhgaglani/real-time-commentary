@@ -66,6 +66,7 @@ class GameState:
 
 
 STORE: Dict[str, GameState] = {}
+ACTIVE_USERNAME: str | None = None  # FIX: Track the currently active username
 
 # ---------------------------
 # Heuristics
@@ -294,13 +295,26 @@ def main():
             # Accept either explicit event or schema shape (in case producer doesn't include event)
             if event == "player_profile":
                 game_id = payload["game_id"]
+                username = payload.get("username")
                 profile = profile
+
+                # FIX: Update active username globally and clear old user's game states
+                global ACTIVE_USERNAME
+                if ACTIVE_USERNAME and ACTIVE_USERNAME != username:
+                    print(f"[USERNAME_SWITCH] Switching from {ACTIVE_USERNAME} to {username}", flush=True)
+                    # Clear old user's game states
+                    old_games = [gid for gid, state in STORE.items() if state.username == ACTIVE_USERNAME]
+                    for gid in old_games:
+                        del STORE[gid]
+                        print(f"[CLEANUP] Removed game {gid} for old user {ACTIVE_USERNAME}", flush=True)
+                
+                ACTIVE_USERNAME = username
 
                 STORE[game_id] = GameState(
                     profile_json=profile,
-                    username= profile.get("identity", {}).get('username', 'Unknown User')
+                    username=username
                 )
-                print(f"[PROFILE] cached game_id={game_id}", flush=True)
+                print(f"[PROFILE] cached game_id={game_id} username={username}", flush=True)
                 continue
 
             # --- Session start/end (optional logging) ---
@@ -314,10 +328,21 @@ def main():
                 move_number = int(payload["move_number"])
                 uci_move = payload.get("uci_move")
                 snap = payload.get("snap")
+                move_username = payload.get("username")
+
+                # FIX: CRITICAL - Validate username matches active username
+                if ACTIVE_USERNAME and move_username != ACTIVE_USERNAME:
+                    print(f"[SKIP_USER] Ignoring move for {move_username}, active user is {ACTIVE_USERNAME}", flush=True)
+                    continue
 
                 st = STORE.get(game_id)
                 if not st:
                     print(f"[NO_PROFILE] game_id={game_id} move={move_number}", flush=True)
+                    continue
+                
+                # FIX: Double-check username matches stored state
+                if st.username != move_username:
+                    print(f"[SKIP_MISMATCH] Move username {move_username} != stored username {st.username}", flush=True)
                     continue
 
                 latest_move, player_colour = calculate_latest_move(snap)
