@@ -135,6 +135,15 @@ def produce_lichess_stream(
     poll_seconds: float = 1.0,
 ):
     producer = Producer(config)
+    
+    # FIX: Create consumer to listen for new profile requests while tracking current user
+    # This allows switching to a new username when frontend sends a new profile
+    profile_checker = Consumer({
+        **config,
+        "group.id": f"profile-checker-{int(time.time())}",
+        "auto.offset.reset": "latest",
+    })
+    profile_checker.subscribe([topic_player_profile])
 
     last_game_id = None
     last_moves: list[str] = []
@@ -143,6 +152,21 @@ def produce_lichess_stream(
     print(f"[START] Tracking user={username}", flush=True)
 
     while True:
+        # FIX: Check for new profile (non-blocking poll)
+        # If a new username is detected, return the new profile event to main() for immediate switch
+        check_msg = profile_checker.poll(0.1)
+        if check_msg and not check_msg.error():
+            try:
+                check_event = json.loads(check_msg.value().decode("utf-8"))
+                if check_event.get("event") == "player_profile":
+                    new_username = check_event.get("username")
+                    if new_username and new_username != username:
+                        print(f"[SWITCH] New username detected: {new_username}. Exiting tracking for {username}", flush=True)
+                        profile_checker.close()
+                        return check_event  # FIX: Return the new profile event instead of None
+            except Exception as e:
+                print(f"[CHECK_ERROR] {e}", flush=True)
+        
         try:
             status = lichess_user_status(username)
             playing_id = status.get("playingId")
@@ -242,6 +266,9 @@ def produce_lichess_stream(
         except Exception as e:
             print(f"[ERROR] {e}", flush=True)
             time.sleep(2)
+    
+    # FIX: Cleanup profile checker consumer when exiting
+    profile_checker.close()
 
 
 # ------------------
@@ -257,22 +284,44 @@ def main():
     topic_session_events = os.getenv("TOPIC_SESSION_EVENTS", "session_events")
     poll_seconds = float(os.getenv("POLL_SECONDS", "1.0"))
 
-    profile_event = wait_for_profile(config)
+    # FIX: Outer loop to handle multiple users
+    # Previously, producer would only accept ONE username and track it forever
+    # Now it can switch to new users when frontend sends new profile events
+    profile_event = None  # FIX: Initialize to None for first iteration
+    
+    while True:
+        # FIX: Only wait for new profile if we don't already have one from previous switch
+        if profile_event is None:
+            print("[MAIN] Waiting for profile...", flush=True)
+            profile_event = wait_for_profile(config)
 
-    username = profile_event["username"]
-    profile = profile_event["profile"]
+        username = profile_event["username"]
+        profile = profile_event["profile"]
 
-    print(profile)
+        print(f"[MAIN] Starting tracking for {username}", flush=True)
+        print(profile)
 
-    produce_lichess_stream(
-        username=username,
-        profile=profile,
-        topic_player_profile=topic_player_profile,
-        topic_live_moves=topic_live_moves,
-        topic_session_events=topic_session_events,
-        config=config,
-        poll_seconds=poll_seconds,
-    )
+        try:
+            # FIX: Capture returned profile event (if user switched)
+            new_profile_event = produce_lichess_stream(
+                username=username,
+                profile=profile,
+                topic_player_profile=topic_player_profile,
+                topic_live_moves=topic_live_moves,
+                topic_session_events=topic_session_events,
+                config=config,
+                poll_seconds=poll_seconds,
+            )
+            # FIX: Use the new profile event for next iteration (skip wait_for_profile)
+            profile_event = new_profile_event
+            
+        except KeyboardInterrupt:
+            print("\n[MAIN] Shutting down", flush=True)
+            break
+        except Exception as e:
+            print(f"[MAIN] Error: {e}", flush=True)
+            profile_event = None  # FIX: Reset on error, wait for new profile
+            time.sleep(2)
 
 
 if __name__ == "__main__":
