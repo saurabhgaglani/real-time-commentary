@@ -13,6 +13,9 @@ from elevenlabs.client import ElevenLabs
 from elevenlabs.play import play, save
 import time
 
+# Import health server for Cloud Run compatibility
+from backend.health_server import start_health_server
+
 
 
 # ---------------------------
@@ -115,7 +118,6 @@ def build_initial_prompt(
 ) -> str:
     profile_str = json.dumps(st.profile_json, ensure_ascii=False)
     snap_str = json.dumps(snap, ensure_ascii=False)
-    st.is_first_commentary = False
     username_color = get_player_color(snap, st.username)
 
     return (
@@ -251,9 +253,27 @@ def call_elevenlabs_tts(text: str, temp_move_number: int):
 # ---------------------------
 
 def main():
+    # Start health check server for Cloud Run (runs in background thread)
+    start_health_server(port=8080)
+    
+    print("=" * 60, flush=True)
+    print("CONSUMER SERVICE STARTING", flush=True)
+    print("=" * 60, flush=True)
+    print(f"[STARTUP] PID: {os.getpid()}", flush=True)
+    print(f"[STARTUP] Script: backend/consumer_commentary.py", flush=True)
+    print(f"[STARTUP] Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}", flush=True)
     
     config_path = Path(os.getenv("KAFKA_CONFIG", str(PROJECT_ROOT / "client.properties")))
-    config = read_config(str(config_path))
+    print(f"[CONFIG] Kafka config path: {config_path}", flush=True)
+    print(f"[CONFIG] Config exists: {config_path.exists()}", flush=True)
+    
+    try:
+        config = read_config(str(config_path))
+        print(f"[KAFKA] Successfully loaded config with {len(config)} entries", flush=True)
+        print(f"[KAFKA] Bootstrap servers: {config.get('bootstrap.servers', 'NOT SET')}", flush=True)
+    except Exception as e:
+        print(f"[FATAL] Failed to load Kafka config: {e}", flush=True)
+        raise
 
 
     # Consumer config
@@ -261,21 +281,41 @@ def main():
     consumer_conf["group.id"] = GROUP_ID
     consumer_conf["auto.offset.reset"] = AUTO_OFFSET_RESET
 
+    print(f"[CONFIG] Consumer group: {GROUP_ID}", flush=True)
+    print(f"[CONFIG] Auto offset reset: {AUTO_OFFSET_RESET}", flush=True)
+    print(f"[CONFIG] Profile topic: {TOPIC_PLAYER_PROFILE}", flush=True)
+    print(f"[CONFIG] Moves topic: {TOPIC_LIVE_MOVES}", flush=True)
+    print(f"[CONFIG] Output topic: {TOPIC_OUT_AUDIO}", flush=True)
+    
+    print(f"[KAFKA] Creating consumer...", flush=True)
     consumer = Consumer(consumer_conf)
 
     # OPTION A: single topic mode (you mapped all env topics to chess_stream)
     # Subscribe to the unique set to avoid duplicates if they are the same string.
     topics = sorted({TOPIC_PLAYER_PROFILE, TOPIC_LIVE_MOVES})
     consumer.subscribe(topics)
+    print(f"[KAFKA] ✓ Consumer created successfully", flush=True)
+    print(f"[KAFKA] ✓ Subscribed to topics: {', '.join(topics)}", flush=True)
 
     # Producer for output audio events (in Option A this is also chess_stream)
+    print(f"[KAFKA] Creating producer...", flush=True)
     producer = Producer(config)
+    print(f"[KAFKA] ✓ Producer created successfully", flush=True)
 
-    print(f"[BOOT] consuming: {', '.join(topics)} | producing: {TOPIC_OUT_AUDIO}", flush=True)
+    print(f"[KAFKA] Kafka stream is UP and RUNNING", flush=True)
+    print(f"[BOOT] ✓ consuming: {', '.join(topics)} | producing: {TOPIC_OUT_AUDIO}", flush=True)
+    print("=" * 60, flush=True)
 
     try:
+        poll_count = 0
         while True:
             msg = consumer.poll(1.0)
+            poll_count += 1
+            
+            # Log every 60 seconds to show we're still alive
+            if poll_count % 60 == 0:
+                print(f"[KAFKA] Still polling (count: {poll_count})... Kafka stream active", flush=True)
+            
             if msg is None:
                 continue
             if msg.error():
@@ -287,7 +327,7 @@ def main():
             profile = payload.get("profile", {})
 
             # Ignore our own emitted audio messages to prevent loops (since output is same topic)
-            if "audio_base64" in payload:
+            if event == "commentary_audio" or "audio_url" in payload or "audio_base64" in payload:
                 continue
 
             # --- Profile messages ---
@@ -300,7 +340,7 @@ def main():
                     profile_json=profile,
                     username= profile.get("identity", {}).get('username', 'Unknown User')
                 )
-                print(f"[PROFILE] cached game_id={game_id}", flush=True)
+                print(f"[PROFILE] ✓ cached game_id={game_id}", flush=True)
                 continue
 
             # --- Session start/end (optional logging) ---
@@ -322,7 +362,7 @@ def main():
 
                 latest_move, player_colour = calculate_latest_move(snap)
                 print(
-                    f"[MOVE] game_id={game_id} #{move_number} Latest Move ={latest_move} player colour ={player_colour} ",
+                    f"[MOVE] game_id={game_id} #{move_number} Latest Move={latest_move} player colour={player_colour}",
                     flush=True,
                 )
 
@@ -337,25 +377,27 @@ def main():
                     print(f"[COOLDOWN] Skipping move {move_number} - too soon after last commentary", flush=True)
                     continue
 
-                print("BUILDING PROMPT")
+                print(f"[PROMPT] Building prompt for move {move_number}...", flush=True)
 
                 # Properly handle first commentary flag
                 if st.is_first_commentary:
-                    print("CALLING LLM - FIRST COMMENTARY")
+                    print(f"[LLM] Calling LLM - FIRST COMMENTARY", flush=True)
                     prompt = build_initial_prompt(st, snap)
-                    st.is_first_commentary = False  # Reset flag after first use
                 else:
-                    print("CALLING LLM")
+                    print(f"[LLM] Calling LLM - MOVE COMMENTARY", flush=True)
                     prompt = build_live_prompt(st, player_colour, latest_move, snap)
 
                 # --- LABEL: CALL_LLM ---
                 raw_text = call_llm(prompt)
+                print(f"[LLM] ✓ Response received: {raw_text[:50]}...", flush=True)
                 
                 #switching commentators
                 temp_move_number = int(move_number)
 
                 # --- LABEL: CALL_ELEVENLABS ---
+                print(f"[TTS] Generating audio...", flush=True)
                 tts_url = call_elevenlabs_tts(raw_text, temp_move_number)
+                print(f"[TTS] ✓ Audio generated: {tts_url}", flush=True)
                 out = {
                     "event": "commentary_audio",
                     "game_id": game_id,
@@ -377,15 +419,26 @@ def main():
                 # CRITICAL FIX: Update state AFTER successful commentary
                 st.last_commentary_ts = current_time
                 st.last_commentary_move = move_number
+                # Reset first commentary flag AFTER successful generation
+                if st.is_first_commentary:
+                    st.is_first_commentary = False
 
-                print(f"[AUDIO] emitted game_id={game_id} move={move_number}", flush=True)
+                print(f"[AUDIO] ✓ emitted game_id={game_id} move={move_number}", flush=True)
                 continue
 
 
     except KeyboardInterrupt:
-        print("\n[SHUTDOWN]", flush=True)
+        print("\n[SHUTDOWN] Received interrupt signal", flush=True)
+        print(f"[SHUTDOWN] Consumer service stopped at {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}", flush=True)
+    except Exception as e:
+        print(f"[FATAL] Consumer crashed: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
+        print(f"[CLEANUP] Closing consumer...", flush=True)
         consumer.close()
+        print(f"[CLEANUP] Consumer closed", flush=True)
 
 
 

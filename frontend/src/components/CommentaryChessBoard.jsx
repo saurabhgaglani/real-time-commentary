@@ -179,16 +179,14 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
     };
 
     /**
-     * Initialize the board when gameId and username are available OR when first commentary arrives
+     * Initialize the board when gameId and username are available
      */
     useEffect(() => {
         // Initialize if we have gameId/username but haven't initialized yet
-        // OR if we get commentary but haven't initialized yet
-        const shouldInitialize = (gameId && username && !initialSetupRef.current) || 
-                                (currentCommentary && !initialSetupRef.current);
+        const shouldInitialize = gameId && username && !initialSetupRef.current;
         
         if (shouldInitialize) {
-            console.log('🚀 Initializing chess board - gameId:', gameId, 'username:', username, 'hasCommentary:', !!currentCommentary);
+            console.log('🚀 Initializing chess board - gameId:', gameId, 'username:', username);
             initialSetupRef.current = true;
             setIsInitialized(true);
             setError(null);
@@ -206,19 +204,10 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                     console.log(`   - Total moves: ${moves.length}`);
                     console.log(`   - Player color: ${playerColor}`);
                     
-                    // Determine what position to show
-                    let targetMoveNumber = moves.length; // Default to current live position
+                    // Always show the current live position initially
+                    let targetMoveNumber = moves.length; // Show current live position
                     
-                    // If we have commentary, use that move number instead
-                    if (currentCommentary && currentCommentary.moveNumber > 0) {
-                        targetMoveNumber = currentCommentary.moveNumber;
-                        console.log(`🎯 Using commentary position: move ${targetMoveNumber}`);
-                    } else if (moves.length > 0) {
-                        console.log(`🎯 Using live position: ${moves.length} moves`);
-                    } else {
-                        console.log(`📋 No moves yet, showing starting position`);
-                        targetMoveNumber = 0;
-                    }
+                    console.log(`🎯 Showing live position: ${moves.length} moves`);
                     
                     // Build the position
                     if (targetMoveNumber > 0) {
@@ -230,7 +219,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                             setMoveHistory(newMoveHistory);
                             setLastMoveSquares(moveSquares);
                             setLastProcessedMove(targetMoveNumber);
-                            console.log('✅ Position set successfully');
+                            console.log('✅ Live position set successfully');
                         }
                     } else {
                         // Starting position
@@ -259,7 +248,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
             
             initializeGame();
         }
-    }, [gameId, username, currentCommentary]); // Watch all three
+    }, [gameId, username]); // Only depend on gameId and username
 
     /**
      * Update board when commentary arrives (but board is already initialized)
@@ -373,7 +362,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                             Game Position
                         </h3>
                         <div className="flex justify-between text-sm text-gray-300 mb-4">
-                            <span>Loading game data...</span>
+                            <span>Loading live position...</span>
                             <span>Following: {username}</span>
                         </div>
                     </div>
@@ -396,7 +385,8 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                     </div>
                     
                     <div className="text-center text-gray-400">
-                        <p>Initializing live game position...</p>
+                        <p>Loading live game position...</p>
+                        <p className="text-xs mt-2">Board will update automatically when ready</p>
                     </div>
                 </div>
             );
@@ -408,7 +398,7 @@ function CommentaryChessBoard({ currentCommentary, gameId, username }) {
                     <div className="w-16 h-16 mx-auto mb-4 bg-gray-300 rounded-lg flex items-center justify-center">
                         <span className="text-2xl">♔</span>
                     </div>
-                    <p>Loading live game position...</p>
+                    <p>Waiting for game to start...</p>
                     {username && (
                         <p className="text-sm text-gray-500 mt-2">
                             Following: {username}

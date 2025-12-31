@@ -1,450 +1,247 @@
-# Deployment Guide - Fresh Installation
+# Chess Commentary System - Google Cloud Deployment Guide
 
-This guide shows you how to deploy the Chess Commentary System in a new folder/server.
+This guide will help you deploy your chess commentary system to Google Cloud Run.
 
 ## Prerequisites
 
-- Docker Engine 20.10+
-- Docker Compose 2.0+
-- Git (optional, for cloning)
-- Your API keys ready:
-  - ElevenLabs API key
-  - Google Gemini API key
-  - Confluent Cloud Kafka credentials
+1. **Google Cloud Account**: You need a Google Cloud account with billing enabled
+2. **Google Cloud CLI**: Install the `gcloud` CLI tool
+3. **Docker**: Ensure Docker is installed (for local testing)
+4. **API Keys**: Your ElevenLabs and Gemini API keys should be in `.env` file
+5. **Kafka Configuration**: Your `client.properties` file should be present
 
-## Option 1: Clone from Git Repository
+## Quick Deployment (Recommended)
 
-### Step 1: Clone the Repository
-```bash
-# Clone the repository
-git clone <your-repo-url> chess-commentary
-cd chess-commentary
-```
-
-### Step 2: Configure Secrets
-```bash
-# Create .env file
-cp .env.example .env
-
-# Edit .env and add your API keys
-nano .env  # or use any text editor
-```
-
-Add your keys:
-```bash
-ELEVENLABS_API_KEY=sk_your_actual_key_here
-GEMINI_API_KEY=AIza_your_actual_key_here
-```
+### Step 1: Setup Google Cloud Project
 
 ```bash
-# Create client.properties file
-cp client.properties.example client.properties
+# Install Google Cloud CLI if not already installed
+# https://cloud.google.com/sdk/docs/install
 
-# Edit client.properties and add Kafka credentials
-nano client.properties
+# Login to Google Cloud
+gcloud auth login
+
+# Create a new project (or use existing)
+gcloud projects create chess-commentary-system --name="Chess Commentary System"
+
+# Set the project
+gcloud config set project chess-commentary-system
+
+# Enable billing for the project (required for Cloud Run)
+# Go to: https://console.cloud.google.com/billing
 ```
 
-Add your Kafka config:
-```properties
-bootstrap.servers=your-cluster.region.provider.confluent.cloud:9092
-security.protocol=SASL_SSL
-sasl.mechanisms=PLAIN
-sasl.username=your-api-key
-sasl.password=your-api-secret
-session.timeout.ms=45000
-```
-
-### Step 3: Run the Application
-```bash
-# Option A: Use the automated script
-chmod +x docker-start.sh
-./docker-start.sh
-
-# Option B: Use Make
-make start
-
-# Option C: Manual
-docker-compose build
-docker-compose up -d
-```
-
-### Step 4: Access the Application
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8000
-
----
-
-## Option 2: Manual Setup (No Git)
-
-### Step 1: Create Project Directory
-```bash
-mkdir chess-commentary
-cd chess-commentary
-```
-
-### Step 2: Copy Required Files
-
-You need to copy these files from your development machine:
-
-**Essential Files:**
-```
-chess-commentary/
-├── backend/
-│   ├── main.py
-│   ├── websocket_manager.py
-│   ├── consumer_commentary.py
-│   └── producer_lichess.py
-├── frontend/
-│   ├── src/
-│   ├── package.json
-│   ├── vite.config.js
-│   └── ... (all frontend files)
-├── new_requirements.txt
-├── Dockerfile.backend
-├── Dockerfile.frontend
-├── docker-compose.yml
-├── nginx.conf
-├── .dockerignore
-├── .env.example
-└── client.properties.example
-```
-
-**Optional but Recommended:**
-```
-├── docker-compose.prod.yml
-├── docker-start.sh
-├── docker-start.bat
-├── Makefile
-├── DOCKER_SETUP.md
-└── DOCKER_QUICK_REFERENCE.md
-```
-
-### Step 3: Configure Secrets
+### Step 2: Run Automated Deployment
 
 ```bash
-# Create .env from template
-cp .env.example .env
+# Make the deployment script executable
+chmod +x deploy.sh
 
-# Edit .env
-nano .env
+# Run the deployment
+./deploy.sh
 ```
 
-Add your keys:
-```bash
-ELEVENLABS_API_KEY=sk_your_actual_key_here
-GEMINI_API_KEY=AIza_your_actual_key_here
-TOPIC_PROFILE_IN=chess_stream
-TOPIC_LIVE_MOVES=chess_stream
-TOPIC_SESSION_EVENTS=chess_stream
-TOPIC_OUT_AUDIO=chess_stream
-TOPIC_COMMENTARY_AUDIO=chess_stream
-```
+The script will:
+- ✅ Check and enable required Google Cloud APIs
+- 🔐 Create secrets for your API keys
+- 🏗️ Build and deploy all services using Cloud Build
+- 🔧 Configure the frontend with cloud URLs
+- 📋 Provide you with the final URLs
 
-```bash
-# Create client.properties from template
-cp client.properties.example client.properties
+### Step 3: Access Your System
 
-# Edit client.properties
-nano client.properties
-```
+After deployment completes, you'll get:
+- **Frontend URL**: `https://chess-commentary-frontend-XXXXX-uc.a.run.app`
+- **Backend URL**: `https://chess-commentary-backend-XXXXX-uc.a.run.app`
 
-Add Kafka config:
-```properties
-bootstrap.servers=your-cluster.region.provider.confluent.cloud:9092
-security.protocol=SASL_SSL
-sasl.mechanisms=PLAIN
-sasl.username=your-api-key
-sasl.password=your-api-secret
-session.timeout.ms=45000
-```
+## Manual Deployment (Advanced)
 
-### Step 4: Build and Run
+If you prefer manual control or the automated script fails:
+
+### 1. Enable Required APIs
 
 ```bash
-# Build images
-docker-compose build
-
-# Start services
-docker-compose up -d
-
-# Check status
-docker-compose ps
-
-# View logs
-docker-compose logs -f
+gcloud services enable cloudbuild.googleapis.com
+gcloud services enable run.googleapis.com
+gcloud services enable secretmanager.googleapis.com
+gcloud services enable containerregistry.googleapis.com
 ```
 
----
+### 2. Create Secrets
 
-## Option 3: Using Docker Hub (If you push images)
-
-### Step 1: Pull Images
 ```bash
-# Pull pre-built images (if available)
-docker pull your-dockerhub-username/chess-commentary-backend:latest
-docker pull your-dockerhub-username/chess-commentary-frontend:latest
+# Create API key secrets
+echo -n "YOUR_ELEVENLABS_KEY" | gcloud secrets create elevenlabs-api-key --data-file=-
+echo -n "YOUR_GEMINI_KEY" | gcloud secrets create gemini-api-key --data-file=-
+
+# Create Kafka config secret
+gcloud secrets create kafka-client-properties --data-file=client.properties
 ```
 
-### Step 2: Create Minimal Setup
+### 3. Build and Deploy with Cloud Build
 
-Create `docker-compose.yml`:
-```yaml
-version: '3.8'
-
-services:
-  backend:
-    image: your-dockerhub-username/chess-commentary-backend:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - KAFKA_CONFIG=/app/config/client.properties
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    volumes:
-      - ./client.properties:/app/config/client.properties:ro
-      - audio-data:/app/audio
-
-  consumer-commentary:
-    image: your-dockerhub-username/chess-commentary-backend:latest
-    command: ["python", "-u", "backend/consumer_commentary.py"]
-    environment:
-      - KAFKA_CONFIG=/app/config/client.properties
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    volumes:
-      - ./client.properties:/app/config/client.properties:ro
-      - audio-data:/app/audio
-
-  producer-lichess:
-    image: your-dockerhub-username/chess-commentary-backend:latest
-    command: ["python", "-u", "backend/producer_lichess.py"]
-    environment:
-      - KAFKA_CONFIG=/app/config/client.properties
-    volumes:
-      - ./client.properties:/app/config/client.properties:ro
-
-  frontend:
-    image: your-dockerhub-username/chess-commentary-frontend:latest
-    ports:
-      - "3000:80"
-
-volumes:
-  audio-data:
-```
-
-### Step 3: Configure and Run
 ```bash
-# Create .env and client.properties as shown above
-# Then start
-docker-compose up -d
+# Submit build
+gcloud builds submit --config cloudbuild.yaml .
 ```
 
----
+### 4. Update Frontend Configuration
 
-## Verification Steps
+After deployment, update the frontend to use the cloud backend URL:
 
-### 1. Check Services are Running
 ```bash
-docker-compose ps
+# Get backend URL
+BACKEND_URL=$(gcloud run services describe chess-commentary-backend --region=us-central1 --format="value(status.url)")
+
+# Update frontend configuration
+sed -i "s|YOUR_HASH|$(echo $BACKEND_URL | cut -d'/' -f3 | cut -d'-' -f4)|g" frontend/src/config/environment.js
+
+# Rebuild and redeploy frontend
+gcloud builds submit --config - . << EOF
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/chess-commentary-frontend:updated', '-f', 'Dockerfile.frontend', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chess-commentary-frontend:updated']
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: ['run', 'deploy', 'chess-commentary-frontend', '--image', 'gcr.io/$PROJECT_ID/chess-commentary-frontend:updated', '--region', 'us-central1']
+EOF
 ```
 
-Expected output:
+## Architecture Overview
+
+Your deployed system will have:
+
 ```
-NAME                          STATUS    PORTS
-chess-commentary-backend      Up        0.0.0.0:8000->8000/tcp
-chess-commentary-consumer     Up
-chess-commentary-producer     Up
-chess-commentary-frontend     Up        0.0.0.0:3000->80/tcp
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │    │    Backend      │    │   Consumer      │
+│  (Cloud Run)    │◄──►│  (Cloud Run)    │◄──►│  (Cloud Run)    │
+│                 │    │                 │    │                 │
+│ React App       │    │ FastAPI + WS    │    │ Commentary Gen  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        ▼
+                       ┌─────────────────┐    ┌─────────────────┐
+                       │   Producer      │    │     Kafka       │
+                       │  (Cloud Run)    │◄──►│   (Confluent)   │
+                       │                 │    │                 │
+                       │ Lichess Polling │    │   Streaming     │
+                       └─────────────────┘    └─────────────────┘
 ```
 
-### 2. Check Health
-```bash
-# Backend health
-curl http://localhost:8000/health
+## Service Details
 
-# Expected: {"status":"ok"}
-```
+### Frontend Service
+- **URL**: Public, accessible to users
+- **Resources**: 512Mi RAM, 1 CPU
+- **Scaling**: 0-5 instances
+- **Purpose**: React app for user interface
 
-### 3. Check Logs
+### Backend Service  
+- **URL**: Public, handles API requests
+- **Resources**: 2Gi RAM, 2 CPU
+- **Scaling**: 1-10 instances
+- **Purpose**: FastAPI server with WebSocket support
+
+### Consumer Service
+- **URL**: Internal only
+- **Resources**: 1Gi RAM, 1 CPU  
+- **Scaling**: 1-3 instances
+- **Purpose**: Generates AI commentary from moves
+
+### Producer Service
+- **URL**: Internal only
+- **Resources**: 1Gi RAM, 1 CPU
+- **Scaling**: 1-3 instances  
+- **Purpose**: Polls Lichess API for live moves
+
+## Monitoring and Logs
+
+### View Logs
 ```bash
 # All services
-docker-compose logs
+gcloud logging read 'resource.type=cloud_run_revision'
 
 # Specific service
-docker-compose logs backend
-docker-compose logs consumer-commentary
-docker-compose logs producer-lichess
+gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=chess-commentary-backend'
 ```
 
-### 4. Access Frontend
-Open browser: http://localhost:3000
-
-You should see the Chess Commentary interface.
-
----
-
-## Production Deployment
-
-### For Production Server
-
-1. **Use production compose file:**
+### Monitor Performance
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+# Service status
+gcloud run services list --region=us-central1
+
+# Service details
+gcloud run services describe chess-commentary-backend --region=us-central1
 ```
 
-2. **Set up reverse proxy (Nginx/Traefik):**
-```nginx
-# Example Nginx config
-server {
-    listen 80;
-    server_name your-domain.com;
+## Scaling and Costs
 
-    location / {
-        proxy_pass http://localhost:3000;
-    }
+### Expected Costs (Approximate)
+- **Frontend**: ~$5-10/month (minimal usage)
+- **Backend**: ~$20-50/month (depends on usage)
+- **Consumer**: ~$15-30/month (continuous running)
+- **Producer**: ~$15-30/month (continuous running)
 
-    location /api {
-        proxy_pass http://localhost:8000;
-    }
+**Total**: ~$55-120/month for moderate usage
 
-    location /ws {
-        proxy_pass http://localhost:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
-3. **Enable HTTPS with Let's Encrypt:**
-```bash
-certbot --nginx -d your-domain.com
-```
-
-4. **Set up monitoring:**
-```bash
-# Add to docker-compose.prod.yml
-  prometheus:
-    image: prom/prometheus
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-
-  grafana:
-    image: grafana/grafana
-    ports:
-      - "3001:3000"
-```
-
----
+### Cost Optimization
+- Services auto-scale to zero when not in use (except consumer/producer)
+- Use `--min-instances=0` for development environments
+- Monitor usage in Google Cloud Console
 
 ## Troubleshooting
 
-### Services won't start
-```bash
-# Check Docker is running
-docker ps
+### Common Issues
 
-# Check logs for errors
-docker-compose logs
+1. **Build Failures**
+   ```bash
+   # Check build logs
+   gcloud builds list --limit=5
+   gcloud builds log BUILD_ID
+   ```
 
-# Rebuild images
-docker-compose build --no-cache
-```
+2. **Service Not Starting**
+   ```bash
+   # Check service logs
+   gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=SERVICE_NAME' --limit=50
+   ```
 
-### Can't connect to Kafka
-```bash
-# Verify client.properties
-cat client.properties
+3. **WebSocket Connection Issues**
+   - Ensure backend service allows WebSocket connections
+   - Check CORS configuration in `backend/main.py`
 
-# Test from container
-docker-compose exec backend python backend/test_kafka_consumer.py
-```
+4. **API Key Issues**
+   ```bash
+   # Verify secrets exist
+   gcloud secrets list
+   
+   # Check secret values (be careful!)
+   gcloud secrets versions access latest --secret=elevenlabs-api-key
+   ```
 
-### Frontend not loading
-```bash
-# Check frontend logs
-docker-compose logs frontend
+### Getting Help
 
-# Check if port 3000 is available
-netstat -an | grep 3000
+1. **Check service status**: Google Cloud Console → Cloud Run
+2. **View logs**: Google Cloud Console → Logging
+3. **Monitor metrics**: Google Cloud Console → Monitoring
 
-# Try accessing directly
-curl http://localhost:3000
-```
+## Security Notes
 
-### Audio not playing
-```bash
-# Check consumer logs
-docker-compose logs consumer-commentary
-
-# Check audio files
-docker-compose exec backend ls -la /app/audio
-
-# Check WebSocket in browser console (F12)
-```
-
----
-
-## File Checklist
-
-Before deploying, ensure you have:
-
-- ✅ `Dockerfile.backend`
-- ✅ `Dockerfile.frontend`
-- ✅ `docker-compose.yml`
-- ✅ `nginx.conf`
-- ✅ `.dockerignore`
-- ✅ `new_requirements.txt`
-- ✅ `backend/` folder with all Python files
-- ✅ `frontend/` folder with all React files
-- ✅ `.env` (configured with your keys)
-- ✅ `client.properties` (configured with Kafka)
-
----
-
-## Quick Commands Reference
-
-```bash
-# Start
-docker-compose up -d
-
-# Stop
-docker-compose down
-
-# Restart
-docker-compose restart
-
-# Logs
-docker-compose logs -f
-
-# Status
-docker-compose ps
-
-# Rebuild
-docker-compose build
-
-# Clean start
-docker-compose down -v
-docker-compose build
-docker-compose up -d
-```
-
----
+- API keys are stored as Google Cloud Secrets
+- Services use IAM for authentication
+- Frontend and backend are publicly accessible (as needed)
+- Consumer and producer are internal-only
+- All traffic uses HTTPS/WSS in production
 
 ## Next Steps
 
-1. ✅ Deploy to new folder
-2. ✅ Configure secrets
-3. ✅ Start services
-4. ⏭️ Test with a Lichess game
-5. ⏭️ Set up monitoring
-6. ⏭️ Configure backups
-7. ⏭️ Enable HTTPS (production)
+After successful deployment:
 
----
+1. **Test the system** with a live chess game
+2. **Monitor performance** and adjust scaling if needed
+3. **Set up alerts** for service failures
+4. **Consider CDN** for better global performance
+5. **Implement CI/CD** for automated deployments
 
-## Support
-
-- Full setup guide: `DOCKER_SETUP.md`
-- Quick reference: `DOCKER_QUICK_REFERENCE.md`
-- File descriptions: `DOCKER_FILES_SUMMARY.md`
+Your chess commentary system is now running on Google Cloud! 🎉

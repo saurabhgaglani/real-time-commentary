@@ -1,0 +1,177 @@
+# Individual Cloud Run service configurations
+# Use this file for manual deployment or reference
+
+# Backend API Service
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: chess-commentary-backend
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/minScale: "1"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 3600
+      containers:
+      - image: gcr.io/PROJECT_ID/chess-commentary-backend:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+        env:
+        - name: KAFKA_CONFIG
+          value: "/app/config/client.properties"
+        - name: TOPIC_PROFILE_IN
+          value: "chess_stream"
+        - name: TOPIC_LIVE_MOVES
+          value: "chess_stream"
+        - name: TOPIC_SESSION_EVENTS
+          value: "chess_stream"
+        - name: TOPIC_OUT_AUDIO
+          value: "chess_stream"
+        - name: TOPIC_COMMENTARY_AUDIO
+          value: "chess_stream"
+        - name: ELEVENLABS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: elevenlabs-api-key
+              key: latest
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-key
+              key: latest
+        - name: YOUR_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-key
+              key: latest
+
+---
+# Frontend Service
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: chess-commentary-frontend
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "5"
+        autoscaling.knative.dev/minScale: "0"
+    spec:
+      containerConcurrency: 80
+      containers:
+      - image: gcr.io/PROJECT_ID/chess-commentary-frontend:latest
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: "1"
+            memory: "512Mi"
+
+---
+# Commentary Consumer Service
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: chess-commentary-consumer
+  annotations:
+    run.googleapis.com/ingress: internal
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "3"
+        autoscaling.knative.dev/minScale: "1"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 3600
+      containers:
+      - image: gcr.io/PROJECT_ID/chess-commentary-backend:latest
+        command: ["python"]
+        args: ["-u", "backend/consumer_commentary.py"]
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        env:
+        - name: KAFKA_CONFIG
+          value: "/app/config/client.properties"
+        - name: TOPIC_PROFILE_IN
+          value: "chess_stream"
+        - name: TOPIC_LIVE_MOVES
+          value: "chess_stream"
+        - name: TOPIC_OUT_AUDIO
+          value: "chess_stream"
+        - name: KAFKA_GROUP_ID
+          value: "commentary-consumer-group-1"
+        - name: AUTO_OFFSET_RESET
+          value: "latest"
+        - name: ELEVENLABS_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: elevenlabs-api-key
+              key: latest
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-key
+              key: latest
+        - name: YOUR_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: gemini-api-key
+              key: latest
+
+---
+# Lichess Producer Service
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: chess-commentary-producer
+  annotations:
+    run.googleapis.com/ingress: internal
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "3"
+        autoscaling.knative.dev/minScale: "1"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 3600
+      containers:
+      - image: gcr.io/PROJECT_ID/chess-commentary-backend:latest
+        command: ["python"]
+        args: ["-u", "backend/producer_lichess.py"]
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        env:
+        - name: KAFKA_CONFIG
+          value: "/app/config/client.properties"
+        - name: TOPIC_PROFILE_IN
+          value: "chess_stream"
+        - name: TOPIC_LIVE_MOVES
+          value: "chess_stream"
+        - name: TOPIC_SESSION_EVENTS
+          value: "chess_stream"
+        - name: POLL_SECONDS
+          value: "1.0"

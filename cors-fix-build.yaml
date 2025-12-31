@@ -1,0 +1,23 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/chess-commentary-backend:cors-fix',
+      '-f', 'Dockerfile.backend',
+      '.'
+    ]
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chess-commentary-backend:cors-fix']
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: [
+      'run', 'deploy', 'chess-commentary-backend',
+      '--image', 'gcr.io/$PROJECT_ID/chess-commentary-backend:cors-fix',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated',
+      '--port', '8000',
+      '--memory', '2Gi',
+      '--cpu', '2',
+      '--set-env-vars', 'KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_SESSION_EVENTS=chess_stream,TOPIC_OUT_AUDIO=chess_stream,TOPIC_COMMENTARY_AUDIO=chess_stream',
+      '--set-secrets', 'ELEVENLABS_API_KEY=elevenlabs-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,YOUR_API_KEY=gemini-api-key:latest'
+    ]

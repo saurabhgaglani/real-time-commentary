@@ -1,0 +1,50 @@
+# This file specifies files that are *not* uploaded to Google Cloud
+# syntax: glob
+
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+
+# Documentation (not needed for build)
+*.md
+README.md
+LICENSE
+
+# Test files
+test_*.py
+test_*.html
+notebooks/
+
+# Audio files (generated at runtime)
+audio/
+
+# Environment files (handled as secrets)
+.env
+.env.*
+
+# IMPORTANT: DO NOT EXCLUDE client.properties - it's needed for Kafka connection
+# client.properties
+
+# Kiro files
+.kiro/
+
+# Build artifacts
+dist/
+build/

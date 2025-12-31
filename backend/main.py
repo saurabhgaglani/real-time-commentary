@@ -45,12 +45,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "http://localhost:3000"
-    ],
+    allow_origins=["*"],  # Allow all origins for now
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,16 +73,47 @@ KAFKA_CONFIG_PATH = Path(os.getenv("KAFKA_CONFIG", str(PROJECT_ROOT / "client.pr
 PROFILE_TOPIC = os.getenv("TOPIC_PROFILE_IN", "player_profile_input")
 COMMENTARY_AUDIO_TOPIC = os.getenv("TOPIC_COMMENTARY_AUDIO", "commentary_audio")
 
+print("=== KAFKA CONFIG DEBUG ===", flush=True)
+print(f"KAFKA_CONFIG env var: {os.getenv('KAFKA_CONFIG')}", flush=True)
+print(f"KAFKA_CONFIG_PATH resolved to: {KAFKA_CONFIG_PATH}", flush=True)
+print(f"File exists: {KAFKA_CONFIG_PATH.exists()}", flush=True)
+print(f"PROFILE_TOPIC: {PROFILE_TOPIC}", flush=True)
+print(f"COMMENTARY_AUDIO_TOPIC: {COMMENTARY_AUDIO_TOPIC}", flush=True)
+print("=========================", flush=True)
+
 
 def load_kafka_config(path: Path) -> dict:
     config = {}
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                config[k] = v
-    return config
+    print(f"[KAFKA] Reading config from: {path}", flush=True)
+    print(f"[KAFKA] File exists: {path.exists()}", flush=True)
+    
+    if path.exists():
+        print(f"[KAFKA] File size: {path.stat().st_size} bytes", flush=True)
+    
+    try:
+        with open(path) as f:
+            content = f.read()
+            print(f"[KAFKA] File content length: {len(content)} chars", flush=True)
+            print(f"[KAFKA] First 100 chars: {content[:100]}", flush=True)
+            
+            for line_num, line in enumerate(content.split('\n'), 1):
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        config[k.strip()] = v.strip()
+                        if k.strip() == 'bootstrap.servers':
+                            print(f"[KAFKA] Found bootstrap.servers: {v.strip()[:50]}...", flush=True)
+                    else:
+                        print(f"[KAFKA] Skipping invalid line {line_num}: {line}", flush=True)
+        print(f"[KAFKA] Loaded {len(config)} config entries", flush=True)
+        print(f"[KAFKA] Bootstrap servers: {config.get('bootstrap.servers', 'NOT FOUND')}", flush=True)
+        return config
+    except Exception as e:
+        print(f"[KAFKA ERROR] Failed to load config: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise
 
 def publish_profile_to_kafka(username: str, profile: dict, producer):
 
@@ -99,13 +125,17 @@ def publish_profile_to_kafka(username: str, profile: dict, producer):
         "ts": int(datetime.utcnow().timestamp() * 1000),
     }
 
-    producer.produce(
-        topic=PROFILE_TOPIC,
-        key=username,
-        value=json.dumps(event).encode("utf-8"),
-    )
-    producer.flush()
-    print(f"[KAFKA] Profile published for {username}")
+    try:
+        producer.produce(
+            topic=PROFILE_TOPIC,
+            key=username,
+            value=json.dumps(event).encode("utf-8"),
+        )
+        producer.flush()
+        print(f"[KAFKA] Profile published for {username} to topic {PROFILE_TOPIC}", flush=True)
+    except Exception as e:
+        print(f"[KAFKA ERROR] Failed to publish profile: {e}", flush=True)
+        raise
 
 
 # ------------------
@@ -709,9 +739,18 @@ def extract_behavioral_profile(username: str, max_games: int = 50):
 
 @app.post("/analyze")
 def analyze(payload: dict):
-    print("[REQUEST] Analyze payload:", payload)
-    kafka_config = load_kafka_config(KAFKA_CONFIG_PATH)
-    producer = Producer(kafka_config)
+    print("[REQUEST] Analyze payload:", payload, flush=True)
+    print(f"[KAFKA] Loading config from: {KAFKA_CONFIG_PATH}", flush=True)
+    print(f"[KAFKA] Target topic: {PROFILE_TOPIC}", flush=True)
+    
+    try:
+        kafka_config = load_kafka_config(KAFKA_CONFIG_PATH)
+        print(f"[KAFKA] Config loaded, bootstrap servers: {kafka_config.get('bootstrap.servers', 'NOT SET')}", flush=True)
+        producer = Producer(kafka_config)
+        print("[KAFKA] Producer created successfully", flush=True)
+    except Exception as e:
+        print(f"[KAFKA ERROR] Failed to create producer: {e}", flush=True)
+        return {"error": f"Kafka connection failed: {str(e)}"}
 
     username = payload.get("username")
     if not username:

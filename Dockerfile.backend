@@ -21,6 +21,9 @@ RUN pip install --no-cache-dir -r new_requirements.txt
 # Copy backend code
 COPY backend/ ./backend/
 
+# Create config and secrets directories (client.properties will be mounted as secret)
+RUN mkdir -p /app/config /secrets
+
 # Create audio directory
 RUN mkdir -p /app/audio
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import CommentaryPlayer from "./components/CommentaryPlayer.jsx";
 import PlayerDashboard from "./components/PlayerDashboard.jsx";
+import { API_CONFIG } from "./config/environment.js";
 
 function App() {
   const [username, setUsername] = useState("");
@@ -12,7 +13,7 @@ function App() {
 const analyzeUser = async () => {
   setStatus("analyzing");
 
-  const res = await fetch("http://127.0.0.1:8000/analyze", {
+  const res = await fetch(`${API_CONFIG.BACKEND_URL}${API_CONFIG.ENDPOINTS.ANALYZE}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -30,7 +31,7 @@ const startLiveGame = async () => {
   // Fetch the current game_id from the backend
   try {
     setStatus("fetching_game");
-    const res = await fetch(`http://127.0.0.1:8000/game/status/${username}`);
+    const res = await fetch(`${API_CONFIG.BACKEND_URL}${API_CONFIG.ENDPOINTS.GAME_STATUS}/${username}`);
     const data = await res.json();
     
     if (data.playing && data.game_id) {
