@@ -1,0 +1,27 @@
+# Producer-specific Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY new_requirements.txt .
+RUN pip install --no-cache-dir -r new_requirements.txt
+
+# Copy application code
+COPY backend/ ./backend/
+
+# Create config and secrets directories (client.properties will be mounted as secret)
+RUN mkdir -p /app/config /secrets
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV KAFKA_CONFIG=/app/config/client.properties
+ENV PORT=8080
+
+# Run producer directly
+CMD ["python", "-u", "backend/producer_lichess.py"]

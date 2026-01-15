@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import AudioQueueManager from '../utils/audioQueue.js';
+import API_CONFIG from '../config/environment.js';
 
 /**
  * Custom hook for managing live commentary WebSocket connection
@@ -101,7 +102,7 @@ function useCommentary(gameId) {
         setError(null);
 
         try {
-            const ws = new WebSocket(`ws://127.0.0.1:8000/ws/commentary/${gameId}`);
+            const ws = new WebSocket(`${API_CONFIG.WS_URL}${API_CONFIG.ENDPOINTS.WS_COMMENTARY}/${gameId}`);
             wsRef.current = ws;
 
             ws.onopen = () => {
