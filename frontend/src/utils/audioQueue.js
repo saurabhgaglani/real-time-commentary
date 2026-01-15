@@ -4,6 +4,8 @@
  * Handles queuing of audio events, sequential playback, error handling,
  * and state management for the commentary audio system.
  */
+import API_CONFIG from '../config/environment.js';
+
 class AudioQueueManager {
     constructor() {
         this.queue = [];
@@ -92,7 +94,7 @@ class AudioQueueManager {
     async playAudio(event) {
         return new Promise((resolve, reject) => {
             // Construct full audio URL
-            const audioUrl = `http://127.0.0.1:8000${event.audio_url}`;
+            const audioUrl = `${API_CONFIG.BACKEND_URL}${event.audio_url}`;
             const audio = new Audio(audioUrl);
             this.currentAudio = audio;
 

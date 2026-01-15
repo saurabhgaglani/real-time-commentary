@@ -1,24 +1,18 @@
-# Backend Dockerfile for Chess Commentary System
+# Consumer-specific Dockerfile
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    libsndfile1 \
-    portaudio19-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements and install Python dependencies
 COPY new_requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r new_requirements.txt
 
-# Copy backend code
+# Copy application code
 COPY backend/ ./backend/
 
 # Create config and secrets directories (client.properties will be mounted as secret)
@@ -27,8 +21,10 @@ RUN mkdir -p /app/config /secrets
 # Create audio directory
 RUN mkdir -p /app/audio
 
-# Expose port for FastAPI
-EXPOSE 8000
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV KAFKA_CONFIG=/app/config/client.properties
+ENV PORT=8080
 
-# Default command (can be overridden in docker-compose)
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run consumer directly
+CMD ["python", "-u", "backend/consumer_commentary.py"]

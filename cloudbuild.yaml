@@ -1,0 +1,188 @@
+# Google Cloud Build configuration for chess commentary system
+steps:
+  # Build backend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/chess-commentary-backend:$BUILD_ID',
+      '-f', 'Dockerfile.backend',
+      '.'
+    ]
+    id: 'build-backend'
+
+  # Build consumer image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/chess-commentary-consumer:$BUILD_ID',
+      '-f', 'Dockerfile.consumer',
+      '.'
+    ]
+    id: 'build-consumer'
+
+  # Build producer image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/chess-commentary-producer:$BUILD_ID',
+      '-f', 'Dockerfile.producer',
+      '.'
+    ]
+    id: 'build-producer'
+
+  # Build frontend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/chess-commentary-frontend:$BUILD_ID',
+      '-f', 'Dockerfile.frontend',
+      '.'
+    ]
+    id: 'build-frontend'
+
+  # Push backend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chess-commentary-backend:$BUILD_ID']
+    id: 'push-backend'
+    waitFor: ['build-backend']
+
+  # Push consumer image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chess-commentary-consumer:$BUILD_ID']
+    id: 'push-consumer'
+    waitFor: ['build-consumer']
+
+  # Push producer image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chess-commentary-producer:$BUILD_ID']
+    id: 'push-producer'
+    waitFor: ['build-producer']
+
+  # Push frontend image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/chess-commentary-frontend:$BUILD_ID']
+    id: 'push-frontend'
+    waitFor: ['build-frontend']
+
+  # Deploy backend to Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: [
+      'run', 'deploy', 'chess-commentary-backend',
+      '--image', 'gcr.io/$PROJECT_ID/chess-commentary-backend:$BUILD_ID',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated',
+      '--port', '8000',
+      '--memory', '2Gi',
+      '--cpu', '2',
+      '--timeout', '3600',
+      '--concurrency', '100',
+      '--max-instances', '10',
+      '--set-env-vars', 'KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_SESSION_EVENTS=chess_stream,TOPIC_OUT_AUDIO=chess_stream,TOPIC_COMMENTARY_AUDIO=chess_stream',
+      '--set-secrets', 'ELEVENLABS_API_KEY=elevenlabs-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,YOUR_API_KEY=gemini-api-key:latest,/app/config/client.properties=kafka-client-properties:latest'
+    ]
+    id: 'deploy-backend'
+    waitFor: ['push-backend']
+
+  # Deploy frontend to Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: [
+      'run', 'deploy', 'chess-commentary-frontend',
+      '--image', 'gcr.io/$PROJECT_ID/chess-commentary-frontend:$BUILD_ID',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated',
+      '--port', '80',
+      '--memory', '512Mi',
+      '--cpu', '1',
+      '--concurrency', '80',
+      '--max-instances', '5'
+    ]
+    id: 'deploy-frontend'
+    waitFor: ['push-frontend']
+
+  # Deploy/Update consumer as a Job (not a service)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run jobs update chess-commentary-consumer-job \
+          --image=gcr.io/$PROJECT_ID/chess-commentary-consumer:$BUILD_ID \
+          --region=us-central1 \
+          --memory=2Gi \
+          --cpu=2 \
+          --task-timeout=24h \
+          --max-retries=3 \
+          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_OUT_AUDIO=chess_stream,KAFKA_GROUP_ID=commentary-consumer-group-1,AUTO_OFFSET_RESET=latest \
+          --set-secrets=ELEVENLABS_API_KEY=elevenlabs-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,YOUR_API_KEY=gemini-api-key:latest,/app/config/client.properties=kafka-client-properties:latest \
+          2>/dev/null || \
+        gcloud run jobs create chess-commentary-consumer-job \
+          --image=gcr.io/$PROJECT_ID/chess-commentary-consumer:$BUILD_ID \
+          --region=us-central1 \
+          --memory=2Gi \
+          --cpu=2 \
+          --task-timeout=24h \
+          --max-retries=3 \
+          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_OUT_AUDIO=chess_stream,KAFKA_GROUP_ID=commentary-consumer-group-1,AUTO_OFFSET_RESET=latest \
+          --set-secrets=ELEVENLABS_API_KEY=elevenlabs-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,YOUR_API_KEY=gemini-api-key:latest,/app/config/client.properties=kafka-client-properties:latest
+    id: 'deploy-consumer'
+    waitFor: ['push-consumer']
+  
+  # Execute the consumer job
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: [
+      'run', 'jobs', 'execute', 'chess-commentary-consumer-job',
+      '--region', 'us-central1',
+      '--async'
+    ]
+    id: 'execute-consumer'
+    waitFor: ['deploy-consumer']
+
+  # Deploy/Update producer as a Job (not a service)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run jobs update chess-commentary-producer-job \
+          --image=gcr.io/$PROJECT_ID/chess-commentary-producer:$BUILD_ID \
+          --region=us-central1 \
+          --memory=1Gi \
+          --cpu=1 \
+          --task-timeout=24h \
+          --max-retries=3 \
+          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_SESSION_EVENTS=chess_stream,POLL_SECONDS=1.0 \
+          --set-secrets=/app/config/client.properties=kafka-client-properties:latest \
+          2>/dev/null || \
+        gcloud run jobs create chess-commentary-producer-job \
+          --image=gcr.io/$PROJECT_ID/chess-commentary-producer:$BUILD_ID \
+          --region=us-central1 \
+          --memory=1Gi \
+          --cpu=1 \
+          --task-timeout=24h \
+          --max-retries=3 \
+          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_SESSION_EVENTS=chess_stream,POLL_SECONDS=1.0 \
+          --set-secrets=/app/config/client.properties=kafka-client-properties:latest
+    id: 'deploy-producer'
+    waitFor: ['push-producer']
+  
+  # Execute the producer job
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: [
+      'run', 'jobs', 'execute', 'chess-commentary-producer-job',
+      '--region', 'us-central1',
+      '--async'
+    ]
+    id: 'execute-producer'
+    waitFor: ['deploy-producer']
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+images:
+  - 'gcr.io/$PROJECT_ID/chess-commentary-backend:$BUILD_ID'
+  - 'gcr.io/$PROJECT_ID/chess-commentary-consumer:$BUILD_ID'
+  - 'gcr.io/$PROJECT_ID/chess-commentary-producer:$BUILD_ID'
+  - 'gcr.io/$PROJECT_ID/chess-commentary-frontend:$BUILD_ID'
