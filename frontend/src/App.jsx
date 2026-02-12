@@ -49,9 +49,32 @@ const startLiveGame = async () => {
   }
 };
 
-const stopLiveGame = () => {
+const stopLiveGame = async () => {
+  // Send stop tracking request to backend
+  try {
+    const res = await fetch(`${API_CONFIG.BACKEND_URL}/stop-tracking`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username }),
+    });
+    
+    if (res.ok) {
+      console.log("Stop tracking request sent successfully");
+    } else {
+      console.error("Failed to send stop tracking request");
+    }
+  } catch (error) {
+    console.error("Error sending stop tracking request:", error);
+  }
+  
+  // Clear frontend state
   setGameId(null);
   setIsGameActive(false);
+  setStatus("idle");
+  setProfile(null);
+  setUsername("");
 };
 
 

@@ -78,7 +78,7 @@ steps:
       '--timeout', '3600',
       '--concurrency', '100',
       '--max-instances', '10',
-      '--set-env-vars', 'KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_SESSION_EVENTS=chess_stream,TOPIC_OUT_AUDIO=chess_stream,TOPIC_COMMENTARY_AUDIO=chess_stream',
+      '--set-env-vars', 'KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_SESSION_EVENTS=chess_stream,TOPIC_OUT_AUDIO=chess_stream,TOPIC_COMMENTARY_AUDIO=chess_stream,GCS_AUDIO_BUCKET=audio-storage-bucket_v1',
       '--set-secrets', 'ELEVENLABS_API_KEY=elevenlabs-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,YOUR_API_KEY=gemini-api-key:latest,/app/config/client.properties=kafka-client-properties:latest'
     ]
     id: 'deploy-backend'
@@ -114,7 +114,7 @@ steps:
           --cpu=2 \
           --task-timeout=24h \
           --max-retries=3 \
-          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_OUT_AUDIO=chess_stream,KAFKA_GROUP_ID=commentary-consumer-group-1,AUTO_OFFSET_RESET=latest \
+          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_OUT_AUDIO=chess_stream,KAFKA_GROUP_ID=commentary-consumer-group-1,AUTO_OFFSET_RESET=latest,GCS_AUDIO_BUCKET=audio-storage-bucket_v1 \
           --set-secrets=ELEVENLABS_API_KEY=elevenlabs-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,YOUR_API_KEY=gemini-api-key:latest,/app/config/client.properties=kafka-client-properties:latest \
           2>/dev/null || \
         gcloud run jobs create chess-commentary-consumer-job \
@@ -124,7 +124,7 @@ steps:
           --cpu=2 \
           --task-timeout=24h \
           --max-retries=3 \
-          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_OUT_AUDIO=chess_stream,KAFKA_GROUP_ID=commentary-consumer-group-1,AUTO_OFFSET_RESET=latest \
+          --set-env-vars=KAFKA_CONFIG=/app/config/client.properties,TOPIC_PROFILE_IN=chess_stream,TOPIC_LIVE_MOVES=chess_stream,TOPIC_OUT_AUDIO=chess_stream,KAFKA_GROUP_ID=commentary-consumer-group-1,AUTO_OFFSET_RESET=latest,GCS_AUDIO_BUCKET=audio-storage-bucket_v1 \
           --set-secrets=ELEVENLABS_API_KEY=elevenlabs-api-key:latest,GEMINI_API_KEY=gemini-api-key:latest,YOUR_API_KEY=gemini-api-key:latest,/app/config/client.properties=kafka-client-properties:latest
     id: 'deploy-consumer'
     waitFor: ['push-consumer']

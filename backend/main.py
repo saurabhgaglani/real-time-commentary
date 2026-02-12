@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 from datetime import date, timedelta, datetime
 from pathlib import Path
 import requests
@@ -11,6 +12,7 @@ import asyncio
 
 from confluent_kafka import Producer
 from backend.websocket_manager import ConnectionManager, KafkaWebSocketBridge
+from google.cloud import storage
 
 ####
 import os
@@ -51,10 +53,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files for audio
+# Mount static files for audio (keep for local fallback)
 audio_dir = PROJECT_ROOT / "audio"
 audio_dir.mkdir(exist_ok=True)
-app.mount("/audio", StaticFiles(directory=str(audio_dir)), name="audio")
+# Removed: app.mount("/audio", StaticFiles(directory=str(audio_dir)), name="audio")
+# We'll serve audio from GCS via custom endpoint
+
+# GCS Configuration
+GCS_BUCKET_NAME = os.getenv("GCS_AUDIO_BUCKET", "audio-storage-bucket_v1")
 
 # Initialize WebSocket connection manager
 connection_manager = ConnectionManager()
@@ -155,6 +161,83 @@ async def shutdown_event():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/stop-tracking")
+def stop_tracking(payload: dict):
+    """
+    Stop tracking a username by publishing a stop event.
+    This causes the producer to exit its tracking loop.
+    """
+    username = payload.get("username")
+    if not username:
+        return {"error": "username required"}, 400
+    
+    try:
+        kafka_config = load_kafka_config(KAFKA_CONFIG_PATH)
+        producer = Producer(kafka_config)
+        
+        # Publish a stop event
+        stop_event = {
+            "event": "stop_tracking",
+            "username": username,
+            "ts": int(datetime.utcnow().timestamp() * 1000),
+        }
+        
+        producer.produce(
+            topic=PROFILE_TOPIC,
+            key=username,
+            value=json.dumps(stop_event).encode("utf-8"),
+        )
+        producer.flush()
+        
+        logging.info(f"Stop tracking event sent for {username}")
+        return {"status": "stopped", "username": username}
+        
+    except Exception as e:
+        logging.error(f"Failed to send stop event: {e}")
+        return {"error": str(e)}, 500
+
+
+# ------------------
+# Audio serving from GCS
+# ------------------
+
+@app.get("/audio/{filename}")
+async def serve_audio(filename: str):
+    """
+    Serve audio files from GCS bucket.
+    Falls back to local storage if GCS fails.
+    """
+    try:
+        # Try to fetch from GCS
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(filename)
+        
+        # Download audio bytes
+        audio_bytes = blob.download_as_bytes()
+        
+        logging.info(f"Served audio from GCS: {filename}")
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+        
+    except Exception as e:
+        logging.error(f"Failed to fetch from GCS: {e}")
+        
+        # Fallback to local storage
+        try:
+            local_path = audio_dir / filename
+            if local_path.exists():
+                with open(local_path, "rb") as f:
+                    audio_bytes = f.read()
+                logging.info(f"Served audio from local storage: {filename}")
+                return Response(content=audio_bytes, media_type="audio/mpeg")
+            else:
+                logging.error(f"Audio file not found: {filename}")
+                return Response(content=b"", status_code=404)
+        except Exception as local_error:
+            logging.error(f"Failed to serve audio: {local_error}")
+            return Response(content=b"", status_code=500)
 
 
 @app.get("/api/audio-files")

@@ -152,18 +152,46 @@ def produce_lichess_stream(
     print(f"[START] Tracking user={username}", flush=True)
 
     while True:
-        # FIX: Check for new profile (non-blocking poll)
-        # If a new username is detected, return the new profile event to main() for immediate switch
+        # FIX: Check for new profile or stop event (non-blocking poll)
         check_msg = profile_checker.poll(0.1)
         if check_msg and not check_msg.error():
             try:
                 check_event = json.loads(check_msg.value().decode("utf-8"))
-                if check_event.get("event") == "player_profile":
+                event_type = check_event.get("event")
+                
+                # Handle stop tracking event
+                if event_type == "stop_tracking":
+                    stop_username = check_event.get("username")
+                    if stop_username == username:
+                        print(f"[STOP] Stop tracking event received for {username}. Exiting.", flush=True)
+                        
+                        # Send session_end if there's an active game
+                        if last_game_id:
+                            end_payload = {
+                                "event": "session_end",
+                                "username": username,
+                                "game_id": last_game_id,
+                                "ts": int(time.time() * 1000),
+                            }
+                            producer.produce(
+                                topic_session_events,
+                                key=last_game_id,
+                                value=json.dumps(end_payload),
+                                callback=delivery_report,
+                            )
+                            producer.flush()
+                            print(f"[SESSION_END] {last_game_id} (stopped)", flush=True)
+                        
+                        profile_checker.close()
+                        return None  # Return None to signal clean stop (not a switch)
+                
+                # Handle new profile (username switch)
+                if event_type == "player_profile":
                     new_username = check_event.get("username")
                     if new_username and new_username != username:
                         print(f"[SWITCH] New username detected: {new_username}. Exiting tracking for {username}", flush=True)
                         profile_checker.close()
-                        return check_event  # FIX: Return the new profile event instead of None
+                        return check_event  # Return the new profile event
             except Exception as e:
                 print(f"[CHECK_ERROR] {e}", flush=True)
         
@@ -312,8 +340,16 @@ def main():
                 config=config,
                 poll_seconds=poll_seconds,
             )
-            # FIX: Use the new profile event for next iteration (skip wait_for_profile)
-            profile_event = new_profile_event
+            
+            # FIX: Handle stop vs switch
+            if new_profile_event is None:
+                # Clean stop - go back to waiting for new profile
+                print("[MAIN] Tracking stopped. Waiting for new profile...", flush=True)
+                profile_event = None  # This will trigger wait_for_profile() on next iteration
+            else:
+                # Username switch - use the new profile event immediately
+                print(f"[MAIN] Switching to new user: {new_profile_event['username']}", flush=True)
+                profile_event = new_profile_event  # Skip wait_for_profile(), use this profile
             
         except KeyboardInterrupt:
             print("\n[MAIN] Shutting down", flush=True)

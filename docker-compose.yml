@@ -21,6 +21,8 @@ services:
       - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - YOUR_API_KEY=${GEMINI_API_KEY}
+      # GCS Configuration
+      - GCS_AUDIO_BUCKET=audio-storage-bucket_v1
     volumes:
       # Mount Kafka config from host (not included in image)
       - ./client.properties:/app/config/client.properties:ro
@@ -51,6 +53,8 @@ services:
       - YOUR_API_KEY=${GEMINI_API_KEY}
       - KAFKA_GROUP_ID=${KAFKA_GROUP_ID:-commentary-consumer-group-1}
       - AUTO_OFFSET_RESET=${AUTO_OFFSET_RESET:-latest}
+      # GCS Configuration
+      - GCS_AUDIO_BUCKET=audio-storage-bucket_v1
     volumes:
       - ./client.properties:/app/config/client.properties:ro
       - audio-data:/app/audio

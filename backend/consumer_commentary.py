@@ -12,6 +12,8 @@ from google import genai
 from elevenlabs.client import ElevenLabs
 from elevenlabs.play import play, save
 import time
+from google.cloud import storage
+import io
 
 
 
@@ -48,6 +50,7 @@ AUTO_OFFSET_RESET = os.getenv("AUTO_OFFSET_RESET", "latest")
 COOLDOWN_SECONDS = float(os.getenv("COOLDOWN_SECONDS", "2"))
 MIN_MOVES_BETWEEN_COMMENTS = int(os.getenv("MIN_MOVES_BETWEEN_COMMENTS", "3"))
 AUDIO_PATH = os.path.join(PROJECT_ROOT, 'audio')
+GCS_BUCKET_NAME = os.getenv("GCS_AUDIO_BUCKET", "audio-storage-bucket_v1")
 
 
 # ---------------------------
@@ -239,11 +242,31 @@ def call_elevenlabs_tts(text: str, temp_move_number: int):
         ]
     )
 
-    file_name = get_filename()
+    file_name = get_filename() + ".mp3"
 
-    save(audio, os.path.join(AUDIO_PATH, file_name + ".mp3"))
+    # Save to GCS instead of local disk
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(file_name)
+        
+        # Convert audio generator to bytes
+        audio_bytes = io.BytesIO()
+        for chunk in audio:
+            audio_bytes.write(chunk)
+        audio_bytes.seek(0)
+        
+        # Upload to GCS
+        blob.upload_from_file(audio_bytes, content_type='audio/mpeg')
+        print(f"[GCS] Uploaded {file_name} to bucket {GCS_BUCKET_NAME}", flush=True)
+        
+    except Exception as e:
+        print(f"[GCS_ERROR] Failed to upload {file_name}: {e}", flush=True)
+        # Fallback to local storage
+        save(audio, os.path.join(AUDIO_PATH, file_name))
+        print(f"[FALLBACK] Saved to local disk: {file_name}", flush=True)
     
-    return f"/audio/{file_name}.mp3"
+    return f"/audio/{file_name}"
     
 
 
@@ -291,6 +314,23 @@ def main():
             if "audio_base64" in payload:
                 continue
 
+            # --- Stop tracking event ---
+            if event == "stop_tracking":
+                stop_username = payload.get("username")
+                print(f"[STOP_EVENT] Received stop tracking for {stop_username}", flush=True)
+                
+                # Clear all game states for this username
+                global ACTIVE_USERNAME
+                if ACTIVE_USERNAME == stop_username:
+                    games_to_remove = [gid for gid, state in STORE.items() if state.username == stop_username]
+                    for gid in games_to_remove:
+                        del STORE[gid]
+                        print(f"[CLEANUP] Removed game {gid} for stopped user {stop_username}", flush=True)
+                    
+                    ACTIVE_USERNAME = None
+                    print(f"[RESET] Active username cleared. Ready for new user.", flush=True)
+                continue
+
             # --- Profile messages ---
             # Accept either explicit event or schema shape (in case producer doesn't include event)
             if event == "player_profile":
@@ -299,7 +339,6 @@ def main():
                 profile = profile
 
                 # FIX: Update active username globally and clear old user's game states
-                global ACTIVE_USERNAME
                 if ACTIVE_USERNAME and ACTIVE_USERNAME != username:
                     print(f"[USERNAME_SWITCH] Switching from {ACTIVE_USERNAME} to {username}", flush=True)
                     # Clear old user's game states
